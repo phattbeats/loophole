@@ -1,0 +1,15 @@
+model:
+  default: "claude-sonnet-4-20250514"
+  max_tokens: 4096
+
+temperatures:
+  legislator: 0.4
+  loophole_finder: 0.9
+  overreach_finder: 0.9
+  judge: 0.3
+
+loop:
+  max_rounds: 10
+  cases_per_agent: 3
+
+session_dir: "sessions"
