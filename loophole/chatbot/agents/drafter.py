@@ -5,7 +5,12 @@ from typing import Any
 
 from loophole.agents.base import BaseAgent
 from loophole.chatbot.models import ChatbotSession, SystemPrompt, TestCase
-from loophole.chatbot.prompts import DRAFTER_INITIAL, DRAFTER_REVISE, DRAFTER_SYSTEM
+from loophole.chatbot.prompts import (
+    DRAFTER_INITIAL,
+    DRAFTER_REVISE,
+    DRAFTER_SYSTEM,
+    DRAFTER_WEAK_INITIAL,
+)
 
 
 def _format_resolved_cases(cases: list[TestCase]) -> str:
@@ -24,6 +29,10 @@ def _format_resolved_cases(cases: list[TestCase]) -> str:
 
 
 class Drafter(BaseAgent):
+    def __init__(self, *args: Any, weak: bool = False, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self.weak = weak
+
     def _build_system_prompt(self, **kwargs: Any) -> str:
         return DRAFTER_SYSTEM
 
@@ -31,7 +40,8 @@ class Drafter(BaseAgent):
         case: TestCase | None = kwargs.get("case")
         cfg = state.config
         if case is None:
-            return DRAFTER_INITIAL.format(
+            template = DRAFTER_WEAK_INITIAL if self.weak else DRAFTER_INITIAL
+            return template.format(
                 company_name=cfg.company_name,
                 company_description=cfg.company_description,
                 chatbot_purpose=cfg.chatbot_purpose,

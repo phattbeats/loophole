@@ -40,7 +40,7 @@ def _load_config() -> dict:
     }
 
 
-def _build_agents(config: dict) -> dict:
+def _build_agents(config: dict, weak: bool = False) -> dict:
     model = config["model"]["default"]
     max_tokens = config["model"]["max_tokens"]
     temps = config["temperatures"]
@@ -49,7 +49,7 @@ def _build_agents(config: dict) -> dict:
     llm = LLMClient(model=model, max_tokens=max_tokens)
 
     return {
-        "drafter": Drafter(llm, temperature=temps["legislator"]),
+        "drafter": Drafter(llm, temperature=temps["legislator"], weak=weak),
         "jailbreak": JailbreakFinder(llm, temperature=temps["loophole_finder"], cases_per_agent=cases_per),
         "refusal": RefusalFinder(llm, temperature=temps["overreach_finder"], cases_per_agent=cases_per),
         "judge": Judge(llm, temperature=temps["judge"]),
@@ -281,6 +281,7 @@ def new(
     company: str = typer.Option(None, help="Company name"),
     description: str = typer.Option(None, "--desc", help="What the company does"),
     chatbot_config_file: str = typer.Option(None, "--chatbot-config", "-c", help="Path to a YAML chatbot config file"),
+    weak: bool = typer.Option(False, "--weak", "-w", help="Start with a deliberately weak/minimal system prompt"),
 ):
     """Start a new chatbot system prompt session."""
     console.print(
@@ -291,9 +292,11 @@ def new(
             padding=(1, 2),
         )
     )
+    if weak:
+        console.print("[yellow]Weak mode: starting with a minimal, naive system prompt[/yellow]")
 
     config = _load_config()
-    agents = _build_agents(config)
+    agents = _build_agents(config, weak=weak)
 
     if chatbot_config_file:
         # Load from YAML config file

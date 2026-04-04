@@ -36,9 +36,34 @@ Tone/personality: {tone}
 
 Produce a thorough, well-structured system prompt."""
 
+DRAFTER_WEAK_INITIAL = """\
+Write a MINIMAL, bare-bones system prompt for a chatbot. Keep it SHORT — \
+just 3-5 sentences. Include only:
+- Who the bot is (one sentence)
+- What it helps with (one sentence listing topics)
+- A brief note about what to avoid (one sentence)
+
+Do NOT add any edge case handling, jailbreak prevention, refusal templates, \
+or detailed rules. Keep it simple and naive — like a first draft written by \
+someone who hasn't thought about adversarial users.
+
+Company: {company_name}
+Description: {company_description}
+Purpose: {chatbot_purpose}
+Should help with: {should_talk_about}
+Should not discuss: {should_not_talk_about}
+Tone: {tone}
+
+Wrap in <system_prompt> tags."""
+
 DRAFTER_REVISE = """\
-Revise the current system prompt to address a new failure case while remaining \
-consistent with ALL previously resolved cases.
+You must patch the current system prompt to address a new failure case.
+
+IMPORTANT: Add exactly ONE new rule, clause, or instruction to fix the \
+specific failure. Do NOT rewrite the whole prompt or add multiple rules. \
+Append your fix to the existing prompt — keep everything that's already \
+there and add the minimum needed to address this case. Think of it like \
+adding a single new line item or paragraph.
 
 COMPANY: {company_name}
 DESCRIPTION: {company_description}
@@ -68,16 +93,16 @@ Resolution: {case_resolution}
 PREVIOUSLY RESOLVED CASES (your revision must still handle all of these correctly):
 {resolved_cases_text}
 
-Revise the system prompt to fix this failure. Make targeted changes — don't \
-rewrite sections that work fine. The revised prompt must still handle all \
-prior cases correctly.
+Add ONE targeted rule or instruction to fix this failure. Keep the rest of \
+the prompt exactly as-is. The fix should be a single additional instruction, \
+not a rewrite.
 
 <system_prompt>
-[your revised system prompt here]
+[the full system prompt with your ONE addition]
 </system_prompt>
 
 <changelog>
-[what you changed and why]
+[what single rule you added and why]
 </changelog>"""
 
 # ---------------------------------------------------------------------------
