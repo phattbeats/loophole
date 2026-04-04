@@ -270,6 +270,7 @@ def _display_round_summary(state, total, auto, escalated):
 def new(
     company: str = typer.Option(None, help="Company name"),
     description: str = typer.Option(None, "--desc", help="What the company does"),
+    chatbot_config_file: str = typer.Option(None, "--chatbot-config", "-c", help="Path to a YAML chatbot config file"),
 ):
     """Start a new chatbot system prompt session."""
     console.print(
@@ -284,25 +285,41 @@ def new(
     config = _load_config()
     agents = _build_agents(config)
 
-    if not company:
-        company = Prompt.ask("\n[bold]Company name[/bold]")
-    if not description:
-        description = Prompt.ask("[bold]What does the company do?[/bold]")
+    if chatbot_config_file:
+        # Load from YAML config file
+        chatbot_data = yaml.safe_load(Path(chatbot_config_file).read_text())
+        chatbot_config = ChatbotConfig(
+            company_name=chatbot_data["company_name"],
+            company_description=chatbot_data["company_description"],
+            chatbot_purpose=chatbot_data["chatbot_purpose"],
+            should_talk_about=chatbot_data["should_talk_about"],
+            should_not_talk_about=chatbot_data["should_not_talk_about"],
+            tone=chatbot_data.get("tone", "Professional and helpful"),
+        )
+        company = chatbot_config.company_name
+        console.print(f"[dim]Loaded chatbot config from {chatbot_config_file}[/dim]")
+        console.print(f"[bold]Company:[/bold] {chatbot_config.company_name}")
+        console.print(f"[bold]Purpose:[/bold] {chatbot_config.chatbot_purpose}")
+    else:
+        if not company:
+            company = Prompt.ask("\n[bold]Company name[/bold]")
+        if not description:
+            description = Prompt.ask("[bold]What does the company do?[/bold]")
 
-    purpose = Prompt.ask("[bold]What should the chatbot help with?[/bold]")
+        purpose = Prompt.ask("[bold]What should the chatbot help with?[/bold]")
 
-    should_talk = _get_multiline_input("What topics SHOULD it talk about?")
-    should_not_talk = _get_multiline_input("What topics should it NOT talk about?")
-    tone = Prompt.ask("[bold]Tone/personality[/bold]", default="Professional and helpful")
+        should_talk = _get_multiline_input("What topics SHOULD it talk about?")
+        should_not_talk = _get_multiline_input("What topics should it NOT talk about?")
+        tone = Prompt.ask("[bold]Tone/personality[/bold]", default="Professional and helpful")
 
-    chatbot_config = ChatbotConfig(
-        company_name=company,
-        company_description=description,
-        chatbot_purpose=purpose,
-        should_talk_about=should_talk,
-        should_not_talk_about=should_not_talk,
-        tone=tone,
-    )
+        chatbot_config = ChatbotConfig(
+            company_name=company,
+            company_description=description,
+            chatbot_purpose=purpose,
+            should_talk_about=should_talk,
+            should_not_talk_about=should_not_talk,
+            tone=tone,
+        )
 
     session_id = f"chatbot_{company.lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     session_mgr = ChatbotSessionManager(config["session_dir"])
