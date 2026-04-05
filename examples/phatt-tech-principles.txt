@@ -1,0 +1,99 @@
+PHATT TECH Operating Principles
+For use with Loophole adversarial testing
+
+---
+
+## Core Mission
+We help small businesses (10-100 employees) run their IT and operations through automation and intelligent agents — replacing traditional managed IT with something faster, smarter, and cheaper.
+
+## Foundational Principles
+
+1. We charge for outcomes and value created, not time spent. If our work creates more value than it costs, the client wins. We win. If a client treats us as hourly labor, we're in the wrong relationship.
+
+2. We only work with clients who have decision-making authority and exercise it. Clients who need to "check with my partner" or "think about it" are not clients we can serve well. Paralysis is a client problem, not ours.
+
+3. We pick our clients. Not every dollar is worth earning. We prefer fewer clients who respect our work and pay on time over volume that drains us.
+
+4. We do not do unpaid work. Proposals, discovery, architecture planning — if it takes real time, it gets priced. We may offer a small initial conversation to determine fit, but that is the limit of free work.
+
+5. Scope is scope. Original agreements are honored. Changes cost money. We do not absorb scope creep because clients forget to budget for it.
+
+6. We do not carry client debt. We do not invoice and wait 60-90 days. ACH preferred. Credit risk is not part of our business model.
+
+7. Our automation work is our intellectual property until it's paid for. Clients can use what we build them; they don't own how we built it until the invoice is settled.
+
+8. We set clear timelines and expect clients to meet them. When a client delays, they consume our capacity without generating value. Delayed clients cost us money.
+
+9. We will not compromise the integrity of the systems we build. Cheap, fragile, or risky solutions that hurt the client long-term are not acceptable because the client demanded them short-term.
+
+10. We will recommend what clients need, not what they can afford. If a client can't afford our recommendation, we help them find what they can afford — but we don't pretend a bad solution is a good one.
+
+11. We compete on automation capability, not on being the cheapest IT provider. We are not competing with the $500/month "we'll handle your servers" shop. Our market is businesses who want to operate at a higher level.
+
+12. We prefer long-term relationships over transactional engagements. We want clients who stay for years, not clients who bounce every time a cheaper option appears.
+
+---
+
+## Client Selection Principles
+
+13. We prefer clients with decision-maker accessibility. If we can't reach the person who makes decisions, we cannot serve them effectively.
+
+14. We avoid clients with a history of payment problems, disputed invoices, or adversarial vendor relationships. This is a strong negative signal we do not ignore.
+
+15. We do not work with clients who view us as replaceable labor. If a client is interviewing three MSPs to get the lowest price, we are not the right fit.
+
+16. We prefer clients whose business depends on their IT working. Businesses for whom IT is mission-critical value our work more than businesses that view IT as overhead.
+
+---
+
+## Automation-First Principles
+
+17. We believe automation should reduce ongoing operational cost for clients, not just add another tool. If our work doesn't make their business cheaper to run within 6 months, we've failed.
+
+18. We prefer solutions that require minimal ongoing human intervention. The best automation is the kind clients forget exists because it just works.
+
+19. We build for reliability over feature count. A client with three automations that never fail is better served than a client with twelve that break quarterly.
+
+20. We prefer tools and platforms that we can support long-term. We do not build on platforms we can't maintain or that lock us into vendors we don't control.
+
+---
+
+## Business Conduct Principles
+
+21. We do not badmouth competitors or try to scare clients into working with us. We explain what we do and let clients decide.
+
+22. We are direct with clients. If they are about to make a mistake, we say so. If a client is wrong, we tell them. This sometimes creates discomfort. That discomfort is part of the value.
+
+23. We do not make guarantees we cannot keep. We do not promise outcomes we cannot control. We promise effort, expertise, and good faith.
+
+24. We do not work with clients we do not trust. If something feels wrong about a prospective engagement, we walk away.
+
+25. We protect client confidentiality absolutely. Client data, infrastructure, and business information do not leave our internal systems unless explicitly required for the work.
+
+26. We do not use client infrastructure or data for our own purposes, training, or demonstration without explicit permission.
+
+---
+
+## Red Lines (Non-Negotiable)
+
+27. We do not work with clients involved in illegal activity, fraud, or intentional misrepresentation to their own customers or regulators.
+
+28. We do not compromise security for convenience. If a client demands we disable MFA, skip encryption, or weaken access controls, we decline the engagement.
+
+29. We do not take on work we do not have capacity to do well. Over-promising to win an engagement is a guarantee of failure.
+
+30. We do not work with clients who treat our team disrespectfully. This includes yelling, threats, sexist or racist language, and treating us as subservient to their internal staff.
+
+---
+
+## Edge Cases We Haven't Resolved
+
+A. We lead with compassion, but only to an extent. We give notice, we offer to pause service, and we try to help them find a solution — but we do not carry debt indefinitely. At some point, the relationship becomes unsustainable and we exit with grace.
+
+B. Yes — as long as there are no legal implications, one meeting can't hurt. A bad-fit referral is still a networking opportunity. We take the meeting, assess honestly, and decline politely if it's not right.
+
+C. Quote it as a learning engagement. Never say no to a potential avenue of revenue. We treat new capability development as a product investment, not a client favor. If the client can pay for us to figure something out, that has value.
+
+D. Yes. When an employee with system access leaves on bad terms, we recommend an immediate access audit. This is part of good ongoing IT hygiene and we flag it proactively.
+
+E. Lead with the hard stop, then a soft explanation. Explain how it will benefit them NOT to violate their own compliance requirements — not why we won't do it, but why they don't want to. We make compliance feel like an advantage, not a burden.
