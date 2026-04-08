@@ -1,0 +1,93 @@
+name: Build and Push to Docker Hub
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Optional Docker tag override (e.g. v1.2.3)'
+        required: false
+        type: string
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract metadata (tags, SHA, version)
+        id: meta
+        run: |
+          SHA=${GITHUB_SHA::8}
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+          # Use annotated git tag as version, orsha
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$TAG" ]; then
+            echo "version=$TAG" >> $GITHUB_OUTPUT
+            echo "tags=phattstudios/loophole:$TAG,phattstudios/loophole:latest,phattstudios/loophole:$SHA" >> $GITHUB_OUTPUT
+          else
+            echo "version=$SHA" >> $GITHUB_OUTPUT
+            echo "tags=phattstudios/loophole:$SHA,phattstudios/loophole:latest" >> $GITHUB_OUTPUT
+          fi
+
+          echo "sha=$SHA"
+
+      - name: Generate release notes from conventional commits
+        id: release_notes
+        run: |
+          NOTES="## Loophole ${{ steps.meta.outputs.version }}\n\n"
+          NOTES+="**Commit:** \`$GITHUB_SHA\`\n\n"
+          NOTES+="### Changes\n\n"
+
+          # Parse conventional commits
+          git log --format="• %s (%h)" --since="30 days ago" main 2>/dev/null | while IFS= read -r line; do
+            echo "$line"
+          done > /tmp/changes.txt
+
+          if [ -s /tmp/changes.txt ]; then
+            NOTES+=$(cat /tmp/changes.txt | sed "s/.*/\&bull; \&/")
+          else
+            NOTES+="See commit history for details."
+          fi
+
+          NOTES+="\n\n**Image:** \`phattstudios/loophole:${{ steps.meta.outputs.version }}\`"
+          echo "notes=$NOTES" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            GITHUB_SHA=${{ github.sha }}
+
+      - name: Create GitHub Release (if tagged)
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref }}
+          name: Loophole ${{ github.ref }}
+          body: ${{ steps.release_notes.outputs.notes }}
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
