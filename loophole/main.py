@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -17,7 +18,8 @@ from loophole.agents.loophole_finder import LoopholeFinder
 from loophole.agents.overreach_finder import OverreachFinder
 from loophole.llm import LLMClient
 from loophole.models import CaseStatus, CaseType, LegalCode, SessionState
-from loophole.session import SessionManager
+from loophole.session import SessionManager, enforce_context_window
+from loophole.deduplication import DeduplicationStore
 
 app = typer.Typer(name="loophole", add_completion=False)
 console = Console()
@@ -25,34 +27,50 @@ console = Console()
 
 def _load_config() -> dict:
     config_path = Path("config.yaml")
-    if config_path.exists():
-        return yaml.safe_load(config_path.read_text())
+    base = yaml.safe_load(config_path.read_text()) if config_path.exists() else {}
+
+    # LiteLLM connection settings (env overrides)
+    lite_llm_cfg = base.get("lite_llm", {})
+    base_url = os.getenv("LITELLM_API_BASE", lite_llm_cfg.get("base_url", "http://10.0.0.100:4000"))
+    api_key = os.getenv("LITELLM_API_KEY", lite_llm_cfg.get("api_key", "sk-foo"))
+    default_model = os.getenv("DEFAULT_MODEL", lite_llm_cfg.get("default_model", "gpt-4o"))
+    max_tokens = base.get("model", {}).get("max_tokens", 4096)
+
+    agent_models = base.get("agent_models", {})
+    temperatures = base.get("temperatures", {})
+    loop = base.get("loop", {"max_rounds": 10, "cases_per_agent": 3, "max_context_tokens": 16000})
+    session_dir = base.get("session_dir", "sessions")
+
     return {
-        "model": {"default": "claude-sonnet-4-20250514", "max_tokens": 4096},
-        "temperatures": {
-            "legislator": 0.4,
-            "loophole_finder": 0.9,
-            "overreach_finder": 0.9,
-            "judge": 0.3,
-        },
-        "loop": {"max_rounds": 10, "cases_per_agent": 3},
-        "session_dir": "sessions",
+        "lite_llm": {"base_url": base_url, "api_key": api_key},
+        "default_model": default_model,
+        "max_tokens": max_tokens,
+        "agent_models": agent_models,
+        "temperatures": temperatures,
+        "loop": loop,
+        "session_dir": session_dir,
     }
 
 
 def _build_agents(config: dict) -> dict:
-    model = config["model"]["default"]
-    max_tokens = config["model"]["max_tokens"]
+    base_url = config["lite_llm"]["base_url"]
+    api_key = config["lite_llm"]["api_key"]
+    default_model = config["default_model"]
+    max_tokens = config["max_tokens"]
+    agent_models = config["agent_models"]
     temps = config["temperatures"]
     cases_per = config["loop"]["cases_per_agent"]
 
-    llm = LLMClient(model=model, max_tokens=max_tokens)
+    # Create a client per agent type with its configured model
+    def make_client(agent_name: str) -> LLMClient:
+        model = agent_models.get(agent_name, default_model)
+        return LLMClient(base_url=base_url, api_key=api_key, model=model, max_tokens=max_tokens, role=agent_name)
 
     return {
-        "legislator": Legislator(llm, temperature=temps["legislator"]),
-        "loophole": LoopholeFinder(llm, temperature=temps["loophole_finder"], cases_per_agent=cases_per),
-        "overreach": OverreachFinder(llm, temperature=temps["overreach_finder"], cases_per_agent=cases_per),
-        "judge": Judge(llm, temperature=temps["judge"]),
+        "legislator": Legislator(make_client("legislator"), temperature=temps.get("legislator", 0.4)),
+        "loophole": LoopholeFinder(make_client("loophole"), temperature=temps.get("loophole_finder", 0.9), cases_per_agent=cases_per),
+        "overreach": OverreachFinder(make_client("overreach"), temperature=temps.get("overreach_finder", 0.9), cases_per_agent=cases_per),
+        "judge": Judge(make_client("judge"), temperature=temps.get("judge", 0.3)),
     }
 
 
@@ -98,7 +116,10 @@ def _get_multiline_input(prompt_text: str) -> str:
     return "\n".join(lines).strip()
 
 
-def _run_adversarial_loop(state, agents, session_mgr, config):
+def _run_adversarial_loop(state, agents, session_mgr, config, noninteractive: bool = False):
+    from loophole.cost_tracker import get_tracker
+    tracker = get_tracker()
+    tracker.start_session(state.session_id)
     max_rounds = config["loop"]["max_rounds"]
     legislator: Legislator = agents["legislator"]
     loophole_finder: LoopholeFinder = agents["loophole"]
@@ -109,6 +130,9 @@ def _run_adversarial_loop(state, agents, session_mgr, config):
         state.current_round += 1
         console.print(Rule(f"[bold] Round {state.current_round} [/bold]", style="cyan"))
 
+        # Initialize dedup store once at start of loop
+        dedup_store = DeduplicationStore()
+
         # Phase 1: Adversarial search
         console.print("\n[bold]Searching for loopholes...[/bold]", end="")
         loopholes = loophole_finder.find(state)
@@ -118,7 +142,20 @@ def _run_adversarial_loop(state, agents, session_mgr, config):
         overreaches = overreach_finder.find(state)
         console.print(f" found [yellow]{len(overreaches)}[/yellow]")
 
-        all_cases = loopholes + overreaches
+        # Deduplication: skip previously seen scenarios
+        seen = set()
+        all_cases_raw = loopholes + overreaches
+        all_cases = []
+        for c in all_cases_raw:
+            fp = dedup_store.fingerprint(c.scenario, state.moral_principles)
+            if fp in seen or dedup_store.is_duplicate(fp):
+                console.print(f"  [dim]Skipping duplicate scenario (Case #{c.id})[/dim]")
+                continue
+            seen.add(fp)
+            dedup_store.record(fp, state.session_id, c.id)
+            all_cases.append(c)
+        del seen  # free memory
+
 
         if not all_cases:
             console.print(
@@ -161,13 +198,36 @@ def _run_adversarial_loop(state, agents, session_mgr, config):
                             f" [green]Resolved → Code v{revised.version}[/green]"
                         )
                         round_auto += 1
+                        # Record in dedup store so same scenario is not re-processed
+                        dedup_store.record(
+                            dedup_store.fingerprint(case_obj.scenario, state.moral_principles),
+                            state.session_id, case_obj.id,
+                            resolution=case_obj.resolution, resolved_by="judge"
+                        )
                     else:
                         # Validation failed — escalate
                         case_obj.status = CaseStatus.ESCALATED
                         case_obj.resolution = None
                         case_obj.resolved_by = None
                         console.print(" [red]Validation failed — escalating[/red]")
-                        _escalate(state, case_obj, validation.details, legislator)
+                        if noninteractive:
+                            # Auto-resolve using judge's reasoning as constraint
+                            auto_decision = validation.details or "Auto-resolved in headless mode (validation failure)"
+                            case_obj.status = CaseStatus.USER_RESOLVED
+                            case_obj.resolution = auto_decision
+                            case_obj.resolved_by = "judge-auto"
+                            state.user_clarifications.append(f"[Case #{case_obj.id}] {auto_decision}")
+                            revised = legislator.revise(state, case_obj)
+                            state.current_code = revised
+                            state.code_history.append(revised)
+                            # Record in dedup store so same scenario is not re-processed
+                            dedup_store.record(
+                                dedup_store.fingerprint(case_obj.scenario, state.moral_principles),
+                                state.session_id, case_obj.id,
+                                resolution=auto_decision, resolved_by="judge-auto"
+                            )
+                        else:
+                            _escalate(state, case_obj, validation.details, legislator)
                         round_escalated += 1
                 else:
                     # No prior cases to validate against, or no proposed revision
@@ -185,27 +245,46 @@ def _run_adversarial_loop(state, agents, session_mgr, config):
             else:
                 # Unresolvable — escalate to user
                 console.print(" [red bold]Cannot resolve — escalating to you[/red bold]")
-                _escalate(state, case_obj, result.conflict_explanation or result.reasoning, legislator)
+                if noninteractive:
+                    auto_decision = result.conflict_explanation or result.reasoning or "Auto-escalated in headless mode"
+                    case_obj.status = CaseStatus.USER_RESOLVED
+                    case_obj.resolution = auto_decision
+                    case_obj.resolved_by = "judge-auto"
+                    state.user_clarifications.append(f"[Case #{case_obj.id}] {auto_decision}")
+                    revised = legislator.revise(state, case_obj)
+                    state.current_code = revised
+                    state.code_history.append(revised)
+                    dedup_store.record(
+                        dedup_store.fingerprint(case_obj.scenario, state.moral_principles),
+                        state.session_id, case_obj.id,
+                        resolution=auto_decision, resolved_by="judge-auto"
+                    )
+                else:
+                    _escalate(state, case_obj, result.conflict_explanation or result.reasoning, legislator)
                 round_escalated += 1
 
             session_mgr.save(state)
+            # Enforce context window after each state change
+            enforce_context_window(state, agents["judge"].llm, config["loop"]["max_context_tokens"])
 
         # Round summary
         _display_round_summary(state, len(all_cases), round_auto, round_escalated)
 
         # Continue?
-        console.print()
-        action = Prompt.ask(
-            "[bold]Next?[/bold]",
-            choices=["continue", "view code", "stop"],
-            default="continue",
-        )
-        if action == "view code":
-            _display_legal_code(state.current_code)
-            if not Confirm.ask("Continue to next round?", default=True):
+        if noninteractive:
+            pass  # auto-continue in noninteractive mode
+        else:
+            action = Prompt.ask(
+                "[bold]Next?[/bold]",
+                choices=["continue", "view code", "stop"],
+                default="continue",
+            )
+            if action == "view code":
+                _display_legal_code(state.current_code)
+                if not Confirm.ask("Continue to next round?", default=True):
+                    break
+            elif action == "stop":
                 break
-        elif action == "stop":
-            break
 
     console.print(Rule("[bold green] Session Complete [/bold green]", style="green"))
     _display_legal_code(state.current_code)
@@ -216,6 +295,19 @@ def _run_adversarial_loop(state, agents, session_mgr, config):
     console.print(
         f"[dim]Session saved to: sessions/{state.session_id}/[/dim]"
     )
+
+    # Cost report
+    from loophole.cost_tracker import get_tracker
+    tracker = get_tracker()
+    try:
+        cost_data = tracker.session_total(state.session_id)
+        console.print(
+            f"[bold]LLM cost:[/bold] ${cost_data['total_cost_usd']:.6f} "
+            f"({cost_data['total_calls']} calls, "
+            f"in={cost_data['total_input_tokens']:,} / out={cost_data['total_output_tokens']:,} tokens)"
+        )
+    except Exception as e:
+        print(f"[WARN] Could not generate cost report: {e}")
 
     # Generate HTML report
     from loophole.visualize import generate_html
@@ -271,6 +363,8 @@ def _display_round_summary(state, total, auto, escalated):
 def new(
     domain: str = typer.Option(None, help="Domain for the legal code (e.g., privacy, property, speech)"),
     principles_file: str = typer.Option(None, "--principles", "-p", help="Path to a text file with moral principles"),
+    headless: bool = typer.Option(False, "--headless", help="Run fully non-interactive (no user prompts)"),
+    rounds: int = typer.Option(0, "--rounds", help="Number of adversarial rounds in headless mode (0 = use config default)"),
 ):
     """Start a new Loophole session."""
     console.print(
@@ -315,7 +409,12 @@ def new(
     state = session_mgr.create_session(session_id, domain, principles, initial_code)
     _display_legal_code(state.current_code)
 
-    if Confirm.ask("Begin adversarial testing?", default=True):
+    if headless:
+        # In headless mode, apply rounds override if specified
+        if rounds:
+            config["loop"]["max_rounds"] = rounds
+        _run_adversarial_loop(state, agents, session_mgr, config, noninteractive=True)
+    elif Confirm.ask("Begin adversarial testing?", default=True):
         _run_adversarial_loop(state, agents, session_mgr, config)
 
 
@@ -448,6 +547,32 @@ def main(ctx: typer.Context):
             ctx.invoke(list_sessions)
         else:
             raise typer.Exit()
+
+
+@app.command("cost")
+def cost_report(
+    session_id: str = typer.Argument(None, help="Session ID to report on"),
+    global_report: bool = typer.Option(False, "--global", help="Show global cost report across all sessions"),
+):
+    """Show cost report for a session or globally."""
+    from loophole.cost_tracker import get_tracker
+    tracker = get_tracker()
+    if global_report:
+        console.print(tracker.report_global())
+        return
+    if not session_id:
+        index = tracker._load_global_index()
+        if not index:
+            console.print("[dim]No cost data found.[/dim]")
+            return
+        table = Table(title="Sessions with cost data")
+        table.add_column("Session ID")
+        for sid in index:
+            table.add_row(sid)
+        console.print(table)
+        console.print("[dim]Run `loophole cost <session-id>` for details.[/dim]")
+        return
+    console.print(tracker.report_session(session_id))
 
 
 if __name__ == "__main__":

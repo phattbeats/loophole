@@ -1,6 +1,13 @@
-model:
-  default: "claude-sonnet-4-20250514"
-  max_tokens: 4096
+lite_llm:
+  base_url: "http://10.0.0.100:4000"
+  api_key: "sk-foo"
+  default_model: "gpt-4o"
+
+agent_models:
+  legislator: "gpt-4o"
+  loophole: "gpt-4o"
+  overreach: "gpt-4o"
+  judge: "claude-3-5-sonnet-20241022"
 
 temperatures:
   legislator: 0.4

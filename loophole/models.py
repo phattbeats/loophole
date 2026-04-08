@@ -45,6 +45,7 @@ class SessionState(BaseModel):
     current_code: LegalCode
     code_history: list[LegalCode] = Field(default_factory=list)
     cases: list[Case] = Field(default_factory=list)
+    case_summaries: list[str] = Field(default_factory=list)  # Summaries of pruned resolved cases
     current_round: int = 0
     created_at: datetime = Field(default_factory=datetime.now)
 

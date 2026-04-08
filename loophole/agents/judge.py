@@ -9,11 +9,20 @@ from loophole.models import Case, SessionState
 from loophole.prompts import JUDGE_RESOLVE, JUDGE_SYSTEM, JUDGE_VALIDATE
 
 
-def _format_resolved_cases(cases: list[Case]) -> str:
-    if not cases:
-        return "(none yet)"
+def _format_resolved_cases(state: SessionState) -> str:
     parts = []
-    for c in cases:
+    # Summaries first, if any
+    if state.case_summaries:
+        parts.append("Summarized earlier cases (concise):")
+        parts.extend(state.case_summaries)
+        parts.append("")  # blank line
+    # Full resolved cases (recent ones)
+    full_cases = state.resolved_cases
+    if not full_cases:
+        if not parts:
+            return "(none yet)"
+        return "\n".join(parts)
+    for c in full_cases:
         parts.append(
             f"Case #{c.id} ({c.case_type.value})\n"
             f"  Scenario: {c.scenario}\n"
@@ -53,7 +62,7 @@ class Judge(BaseAgent):
             case_type=case.case_type.value,
             case_scenario=case.scenario,
             case_explanation=case.explanation,
-            resolved_cases_text=_format_resolved_cases(state.resolved_cases),
+            resolved_cases_text=_format_resolved_cases(state),
         )
 
     def evaluate(self, state: SessionState, case: Case) -> JudgeResult:
@@ -84,7 +93,7 @@ class Judge(BaseAgent):
 
         user_msg = JUDGE_VALIDATE.format(
             proposed_code=proposed_code,
-            resolved_cases_text=_format_resolved_cases(resolved),
+            resolved_cases_text=_format_resolved_cases(state),
         )
         raw = self.llm.call(JUDGE_SYSTEM, user_msg, temperature=self.temperature)
 

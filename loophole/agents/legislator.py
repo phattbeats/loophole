@@ -8,11 +8,20 @@ from loophole.models import Case, LegalCode, SessionState
 from loophole.prompts import LEGISLATOR_INITIAL, LEGISLATOR_REVISE, LEGISLATOR_SYSTEM
 
 
-def _format_resolved_cases(cases: list[Case]) -> str:
-    if not cases:
-        return "(none yet)"
+def _format_resolved_cases(state: SessionState) -> str:
     parts = []
-    for c in cases:
+    # Summaries first, if any
+    if state.case_summaries:
+        parts.append("Summarized earlier cases (concise):")
+        parts.extend(state.case_summaries)
+        parts.append("")  # blank line
+    # Full resolved cases (recent ones that were not pruned)
+    full_cases = state.resolved_cases
+    if not full_cases:
+        if not parts:
+            return "(none yet)"
+        return "\n".join(parts)
+    for c in full_cases:
         parts.append(
             f"Case #{c.id} ({c.case_type.value}) — {c.scenario}\n"
             f"  Resolution: {c.resolution}\n"
@@ -42,7 +51,7 @@ class Legislator(BaseAgent):
             case_scenario=case.scenario,
             case_explanation=case.explanation,
             case_resolution=case.resolution,
-            resolved_cases_text=_format_resolved_cases(state.resolved_cases),
+            resolved_cases_text=_format_resolved_cases(state),
         )
 
     def draft_initial(self, state: SessionState) -> LegalCode:

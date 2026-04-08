@@ -14,3 +14,4 @@ sessions/*/
 
 # Local drafts
 tweet*.md
+__pycache__/

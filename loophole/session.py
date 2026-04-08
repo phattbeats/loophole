@@ -6,6 +6,70 @@ from pathlib import Path
 
 from loophole.models import Case, CaseStatus, LegalCode, SessionState
 
+# --- Token estimation and context window management ---
+
+def estimate_tokens(text: str) -> int:
+    """Rough token count: characters divided by 4 (conservative)."""
+    return (len(text) + 3) // 4
+
+def compute_context_tokens(state: SessionState) -> int:
+    total = 0
+    total += estimate_tokens(state.moral_principles)
+    total += estimate_tokens(state.current_code.text)
+    total += estimate_tokens("\n".join(state.user_clarifications))
+    # Cases: scenario + explanation + resolution
+    for c in state.cases:
+        total += estimate_tokens(c.scenario)
+        total += estimate_tokens(c.explanation)
+        if c.resolution:
+            total += estimate_tokens(c.resolution)
+    # Summaries
+    total += estimate_tokens("\n".join(state.case_summaries))
+    return total
+
+def summarize_case(llm_client, case: Case) -> str:
+    """Generate a one-sentence summary for a resolved case."""
+    prompt = f"""Summarize this resolved case in one concise sentence that captures the key constraint or precedent it established.
+
+Case #{case.id} ({case.case_type.value})
+Scenario: {case.scenario}
+Explanation: {case.explanation}
+Resolution: {case.resolution}
+Resolved by: {case.resolved_by}
+
+One-sentence summary:"""
+    summary = llm_client.call(
+        system="You are a legal summarist. Produce a single, clear sentence that captures the essential precedent from this case.",
+        user_message=prompt,
+        temperature=0.1,
+    )
+    summary = summary.strip().strip('\'"\n')
+    return f"Case #{case.id} ({case.case_type.value}): {summary}"
+
+def enforce_context_window(state: SessionState, llm_client, max_tokens: int):
+    """Summarize and prune oldest resolved cases if token count exceeds max_tokens."""
+    MIN_RECENT = 3
+    total = compute_context_tokens(state)
+    if total <= max_tokens:
+        return
+    resolved = [c for c in state.cases if c.status in (CaseStatus.AUTO_RESOLVED, CaseStatus.USER_RESOLVED)]
+    resolved.sort(key=lambda c: c.created_at)
+    candidates = resolved[:-MIN_RECENT] if len(resolved) > MIN_RECENT else []
+    if not candidates:
+        return
+    for case in candidates:
+        try:
+            summary = summarize_case(llm_client, case)
+            state.case_summaries.append(summary)
+            state.cases.remove(case)
+        except Exception as e:
+            print(f"[WARN] Failed to summarize case #{case.id}: {e}")
+            continue
+        total = compute_context_tokens(state)
+        if total <= max_tokens:
+            break
+
+# --- End context management ---
 
 class SessionManager:
     def __init__(self, base_dir: str = "sessions"):

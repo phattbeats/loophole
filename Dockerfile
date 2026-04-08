@@ -8,18 +8,23 @@ RUN pip install uv
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
 
-# Install dependencies
+# Install dependencies (editable install for console script)
 RUN uv sync --frozen --no-dev
 
-# Copy application code
-COPY loophole/ ./loophole/
-COPY examples/ ./examples/
-COPY config.yaml ./
+# Create a non-root user for running the container
+RUN adduser --disabled-password --gecos "" appuser && \
+    mkdir -p /home/appuser/.config /home/appuser/sessions && \
+    chown -R appuser:appuser /app
 
-# Create sessions directory
-RUN mkdir -p /app/sessions
+# Switch to non-root user
+USER appuser
+
+# Copy application code (owned by appuser from above chown)
+COPY loophole/ /app/loophole/
+COPY examples/ /app/examples/
+COPY config.yaml /app/
 
 ENV PYTHONUNBUFFERED=1
 
-# Run the CLI
-CMD ["uv", "run", "python", "-m", "loophole.main"]
+# Run the CLI (accessible as 'loophole' on PATH after editable install)
+CMD ["loophole"]
