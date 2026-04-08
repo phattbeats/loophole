@@ -38,7 +38,7 @@ def _load_config() -> dict:
 
     agent_models = base.get("agent_models", {})
     temperatures = base.get("temperatures", {})
-    loop = base.get("loop", {"max_rounds": 10, "cases_per_agent": 3, "max_context_tokens": 16000})
+    loop = base.get("loop", {"max_rounds": 10, "cases_per_agent": 3, "max_context_tokens": 60000})
     session_dir = base.get("session_dir", "sessions")
 
     return {

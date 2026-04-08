@@ -18,5 +18,6 @@ temperatures:
 loop:
   max_rounds: 10
   cases_per_agent: 3
+  max_context_tokens: 60000
 
 session_dir: "sessions"
