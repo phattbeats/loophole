@@ -52,7 +52,7 @@ jobs:
           done > /tmp/changes.txt
 
           if [ -s /tmp/changes.txt ]; then
-            NOTES+=$(cat /tmp/changes.txt | sed "s/.*/\&bull; \&/")
+            NOTES+=$(cat /tmp/changes.txt | sed 's/^/- /')
           else
             NOTES+="See commit history for details."
           fi
