@@ -31,10 +31,10 @@ jobs:
           TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           if [ -n "$TAG" ]; then
             echo "version=$TAG" >> $GITHUB_OUTPUT
-            echo "tags=therealphatt/loophole:$TAG,therealphatt/loophole:latest,therealphatt/loophole:$SHA" >> $GITHUB_OUTPUT
+            echo "tags=therealphatt/loophole-unraid:$TAG,therealphatt/loophole-unraid:latest,therealphatt/loophole-unraid:$SHA" >> $GITHUB_OUTPUT
           else
             echo "version=$SHA" >> $GITHUB_OUTPUT
-            echo "tags=therealphatt/loophole:$SHA,therealphatt/loophole:latest" >> $GITHUB_OUTPUT
+            echo "tags=therealphatt/loophole-unraid:$SHA,therealphatt/loophole-unraid:latest" >> $GITHUB_OUTPUT
           fi
 
           echo "sha=$SHA"
@@ -57,7 +57,7 @@ jobs:
             NOTES+="See commit history for details."
           fi
 
-          NOTES+="\n\n**Image:** \`therealphatt/loophole:${{ steps.meta.outputs.version }}\`"
+          NOTES+="\n\n**Image:** \`therealphatt/loophole-unraid:${{ steps.meta.outputs.version }}\`"
           echo "notes=$NOTES" >> $GITHUB_OUTPUT
 
       - name: Set up Docker Buildx
