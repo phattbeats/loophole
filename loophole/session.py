@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from loophole.models import Case, CaseStatus, LegalCode, SessionState
+from loophole.persistence import SQLiteStore
 
 # --- Token estimation and context window management ---
 
@@ -17,13 +19,11 @@ def compute_context_tokens(state: SessionState) -> int:
     total += estimate_tokens(state.moral_principles)
     total += estimate_tokens(state.current_code.text)
     total += estimate_tokens("\n".join(state.user_clarifications))
-    # Cases: scenario + explanation + resolution
     for c in state.cases:
         total += estimate_tokens(c.scenario)
         total += estimate_tokens(c.explanation)
         if c.resolution:
             total += estimate_tokens(c.resolution)
-    # Summaries
     total += estimate_tokens("\n".join(state.case_summaries))
     return total
 
@@ -69,14 +69,40 @@ def enforce_context_window(state: SessionState, llm_client, max_tokens: int):
         if total <= max_tokens:
             break
 
-# --- End context management ---
+
+# --- SessionManager with optional SQLite backend ---
 
 class SessionManager:
-    def __init__(self, base_dir: str = "sessions"):
+    """
+    Manages session state with optional SQLite backend for persistent storage,
+    full-text search, and audit trail.
+
+    Set backend="sqlite" to enable SQLite (default when db_path is set).
+    Set backend="json" for the existing JSON file behavior.
+    """
+
+    def __init__(self, base_dir: str = "sessions", db_path: Optional[str] = None):
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
-    def create_session(self, session_id: str, domain: str, principles: str, initial_code: LegalCode) -> SessionState:
+        if db_path:
+            self._sqlite: Optional[SQLiteStore] = SQLiteStore(db_path)
+            self._sqlite.init()
+        else:
+            self._sqlite = None
+
+    @property
+    def sqlite(self) -> Optional[SQLiteStore]:
+        """SQLite store, if initialized. None if using JSON backend."""
+        return self._sqlite
+
+    def create_session(
+        self,
+        session_id: str,
+        domain: str,
+        principles: str,
+        initial_code: LegalCode,
+    ) -> SessionState:
         state = SessionState(
             session_id=session_id,
             domain=domain,
@@ -88,25 +114,25 @@ class SessionManager:
         return state
 
     def save(self, state: SessionState) -> None:
+        # Always persist JSON for backward compat and human readability
         session_dir = self.base_dir / state.session_id
         session_dir.mkdir(parents=True, exist_ok=True)
 
-        # Machine-readable state
-        (session_dir / "state.json").write_text(
-            state.model_dump_json(indent=2)
-        )
-
-        # Human-readable legal code
+        (session_dir / "state.json").write_text(state.model_dump_json(indent=2))
         (session_dir / "current_code.md").write_text(
             f"# Legal Code v{state.current_code.version}\n\n"
-            f"*Domain: {state.domain}*\n\n"
-            f"{state.current_code.text}\n"
+            f"*Domain: {state.domain}*\n\n{state.current_code.text}\n"
         )
+        (session_dir / "case_log.md").write_text(_render_case_log(state))
 
-        # Human-readable case log
-        (session_dir / "case_log.md").write_text(
-            _render_case_log(state)
-        )
+        # SQLite: upsert all cases + summaries
+        if self._sqlite:
+            self._sqlite.save_cases_batch(state)
+            for summary in state.case_summaries:
+                # Only record if not already present (avoid dupes after prune+reload)
+                existing = self._sqlite.load_case_summaries(state.session_id)
+                if summary not in existing:
+                    self._sqlite.record_case_summary(state.session_id, summary)
 
     def load(self, session_id: str) -> SessionState:
         state_path = self.base_dir / session_id / "state.json"
@@ -127,12 +153,53 @@ class SessionManager:
                 })
         return sessions
 
+    # ---- SQLite-only queries (no-op on JSON backend) ----
+
+    def record_response(
+        self,
+        session_id: str,
+        round_num: int,
+        agent_id: str,
+        role: str,
+        response: str,
+    ) -> None:
+        """Record agent response for audit trail. Requires SQLite backend."""
+        if self._sqlite:
+            self._sqlite.record_response(session_id, round_num, agent_id, role, response)
+
+    def find_similar_cases(
+        self,
+        scenario_text: str,
+        session_id: Optional[str] = None,
+        limit: int = 5,
+    ) -> list[Case]:
+        """Full-text search across resolved cases. Requires SQLite backend."""
+        if self._sqlite:
+            return self._sqlite.find_similar_cases(scenario_text, session_id, limit)
+        return []
+
+    def record_vote(
+        self,
+        case_id: int,
+        voter_id: str,
+        role: str,
+        vote: str,
+        confidence: Optional[float] = None,
+        reasoning: Optional[str] = None,
+    ) -> None:
+        """Record an agent vote. Requires SQLite backend."""
+        if self._sqlite:
+            self._sqlite.record_vote(case_id, voter_id, role, vote, confidence, reasoning)
+
+    def get_session_audit(self, session_id: str) -> Optional[dict]:
+        """Full audit trail. Requires SQLite backend."""
+        if self._sqlite:
+            return self._sqlite.get_session_audit(session_id)
+        return None
+
 
 def _render_case_log(state: SessionState) -> str:
-    lines = [
-        f"# Case Log — {state.domain}",
-        f"*Session: {state.session_id}*\n",
-    ]
+    lines = [f"# Case Log — {state.domain}", f"*Session: {state.session_id}*\n"]
 
     status_labels = {
         CaseStatus.AUTO_RESOLVED: "Auto-resolved by Judge",

@@ -40,6 +40,7 @@ def _load_config() -> dict:
     temperatures = base.get("temperatures", {})
     loop = base.get("loop", {"max_rounds": 10, "cases_per_agent": 3, "max_context_tokens": 60000})
     session_dir = base.get("session_dir", "sessions")
+    db_path = base.get("db_path", "sessions/loophole.db")
 
     return {
         "lite_llm": {"base_url": base_url, "api_key": api_key},
@@ -49,6 +50,7 @@ def _load_config() -> dict:
         "temperatures": temperatures,
         "loop": loop,
         "session_dir": session_dir,
+        "db_path": db_path,
     }
 
 
@@ -141,6 +143,13 @@ def _run_adversarial_loop(state, agents, session_mgr, config, noninteractive: bo
         console.print("[bold]Searching for overreach...[/bold]", end="")
         overreaches = overreach_finder.find(state)
         console.print(f" found [yellow]{len(overreaches)}[/yellow]")
+
+        # Audit trail: record each agent's raw output
+        if session_mgr.sqlite:
+            for lf_case in loopholes:
+                session_mgr.record_response(state.session_id, state.current_round, lf_case.id, "loophole_finder", lf_case.scenario)
+            for ov_case in overreaches:
+                session_mgr.record_response(state.session_id, state.current_round, ov_case.id, "overreach_finder", ov_case.scenario)
 
         # Deduplication: skip previously seen scenarios
         seen = set()
@@ -391,7 +400,7 @@ def new(
         )
 
     session_id = f"{domain}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    session_mgr = SessionManager(config["session_dir"])
+    session_mgr = SessionManager(config["session_dir"], config["db_path"])
 
     # Generate initial legal code
     console.print("\n[bold]Generating initial legal code...[/bold]")
@@ -424,7 +433,7 @@ def resume(
 ):
     """Resume an existing session."""
     config = _load_config()
-    session_mgr = SessionManager(config["session_dir"])
+    session_mgr = SessionManager(config["session_dir"], config["db_path"])
 
     if not session_id:
         sessions = session_mgr.list_sessions()
@@ -463,7 +472,7 @@ def resume(
 def list_sessions():
     """List all sessions."""
     config = _load_config()
-    session_mgr = SessionManager(config["session_dir"])
+    session_mgr = SessionManager(config["session_dir"], config["db_path"])
     sessions = session_mgr.list_sessions()
 
     if not sessions:
@@ -491,7 +500,7 @@ def visualize(
 ):
     """Generate an HTML visualization of a session."""
     config = _load_config()
-    session_mgr = SessionManager(config["session_dir"])
+    session_mgr = SessionManager(config["session_dir"], config["db_path"])
 
     if not session_id:
         sessions = session_mgr.list_sessions()

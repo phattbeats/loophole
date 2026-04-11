@@ -21,3 +21,4 @@ loop:
   max_context_tokens: 60000
 
 session_dir: "sessions"
+db_path: "sessions/loophole.db"
