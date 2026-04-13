@@ -19,6 +19,8 @@ loop:
   max_rounds: 10
   cases_per_agent: 3
   max_context_tokens: 60000
+  rounds: 3  # number of phases per round: opening, attack, closing
+  cases_per_phase: 3  # cases produced per agent per phase
 
 session_dir: "sessions"
 db_path: "sessions/loophole.db"

@@ -123,104 +123,95 @@ def _run_adversarial_loop(state, agents, session_mgr, config, noninteractive: bo
     tracker = get_tracker()
     tracker.start_session(state.session_id)
     max_rounds = config["loop"]["max_rounds"]
+    num_phases = config["loop"].get("rounds", 3)
     legislator: Legislator = agents["legislator"]
     loophole_finder: LoopholeFinder = agents["loophole"]
     overreach_finder: OverreachFinder = agents["overreach"]
     judge: Judge = agents["judge"]
 
+    # Opening / Attack / Closing phases per round
+    from loophole.models import RoundType
+    phases = [RoundType.OPENING, RoundType.ATTACK, RoundType.CLOSING][:num_phases]
+
     while state.current_round < max_rounds:
         state.current_round += 1
         console.print(Rule(f"[bold] Round {state.current_round} [/bold]", style="cyan"))
 
-        # Initialize dedup store once at start of loop
         dedup_store = DeduplicationStore()
+        all_round_cases = []
 
-        # Phase 1: Adversarial search
-        console.print("\n[bold]Searching for loopholes...[/bold]", end="")
-        loopholes = loophole_finder.find(state)
-        console.print(f" found [red]{len(loopholes)}[/red]")
+        for phase in phases:
+            state.current_round_type = phase
+            console.print(f"\n[bold cyan]  Phase: {phase.value.upper()}[/bold cyan]")
 
-        console.print("[bold]Searching for overreach...[/bold]", end="")
-        overreaches = overreach_finder.find(state)
-        console.print(f" found [yellow]{len(overreaches)}[/yellow]")
+            console.print("[bold]Searching for loopholes...[/bold]", end="")
+            loopholes = loophole_finder.find(state, round_type=phase)
+            console.print(f" found [red]{len(loopholes)}[/red]")
 
-        # Audit trail: record each agent's raw output
-        if session_mgr.sqlite:
-            for lf_case in loopholes:
-                session_mgr.record_response(state.session_id, state.current_round, lf_case.id, "loophole_finder", lf_case.scenario)
-            for ov_case in overreaches:
-                session_mgr.record_response(state.session_id, state.current_round, ov_case.id, "overreach_finder", ov_case.scenario)
+            console.print("[bold]Searching for overreach...[/bold]", end="")
+            overreaches = overreach_finder.find(state, round_type=phase)
+            console.print(f" found [yellow]{len(overreaches)}[/yellow]")
 
-        # Deduplication: skip previously seen scenarios
-        seen = set()
-        all_cases_raw = loopholes + overreaches
-        all_cases = []
-        for c in all_cases_raw:
-            fp = dedup_store.fingerprint(c.scenario, state.moral_principles)
-            if fp in seen or dedup_store.is_duplicate(fp):
-                console.print(f"  [dim]Skipping duplicate scenario (Case #{c.id})[/dim]")
-                continue
-            seen.add(fp)
-            dedup_store.record(fp, state.session_id, c.id)
-            all_cases.append(c)
-        del seen  # free memory
+            if session_mgr.sqlite:
+                for c in loopholes:
+                    session_mgr.record_response(state.session_id, state.current_round, c.id, "loophole_finder", c.scenario)
+                for c in overreaches:
+                    session_mgr.record_response(state.session_id, state.current_round, c.id, "overreach_finder", c.scenario)
 
+            # Deduplicate across phases within this round
+            for c in loopholes + overreaches:
+                fp = dedup_store.fingerprint(c.scenario, state.moral_principles)
+                if fp in dedup_store._index or dedup_store.is_duplicate(fp):
+                    console.print(f"  [dim]Skipping duplicate (Case #{c.id})[/dim]")
+                    continue
+                dedup_store.record(fp, state.session_id, c.id)
+                all_round_cases.append(c)
 
-        if not all_cases:
+        if not all_round_cases:
             console.print(
                 "\n[green bold]No failures found! "
                 "The legal code appears robust against this round of testing.[/green bold]"
             )
-            if not Confirm.ask("Run another round to be sure?", default=False):
+            if not (noninteractive or Confirm.ask("Run another round to be sure?", default=False)):
                 break
             continue
 
-        # Phase 2: Judge each case
+        # Evaluate all cases from all phases
         round_auto = 0
         round_escalated = 0
 
-        for case_obj in all_cases:
+        for case_obj in all_round_cases:
             state.cases.append(case_obj)
             _display_case(case_obj)
 
-            # Judge attempts auto-resolution
             console.print("  [dim]Judge evaluating...[/dim]", end="")
-            result = judge.evaluate(state, case_obj)
+            result = judge.evaluate(state, case_obj, round_type=case_obj.round_type)
 
             if result.resolvable:
-                # Validate against test suite
                 if result.proposed_revision and state.resolved_cases:
                     console.print(" [dim]validating...[/dim]", end="")
-
-                    # Have the legislator produce the actual revised code
                     case_obj.resolution = result.resolution_summary or result.reasoning
                     case_obj.status = CaseStatus.AUTO_RESOLVED
                     case_obj.resolved_by = "judge"
 
                     revised = legislator.revise(state, case_obj)
-
                     validation = judge.validate(state, revised.text)
                     if validation.passes:
                         state.current_code = revised
                         state.code_history.append(revised)
-                        console.print(
-                            f" [green]Resolved → Code v{revised.version}[/green]"
-                        )
+                        console.print(f" [green]Resolved \u2192 Code v{revised.version}[/green]")
                         round_auto += 1
-                        # Record in dedup store so same scenario is not re-processed
                         dedup_store.record(
                             dedup_store.fingerprint(case_obj.scenario, state.moral_principles),
                             state.session_id, case_obj.id,
-                            resolution=case_obj.resolution, resolved_by="judge"
+                            resolution=case_obj.resolution, resolved_by="judge",
                         )
                     else:
-                        # Validation failed — escalate
                         case_obj.status = CaseStatus.ESCALATED
                         case_obj.resolution = None
                         case_obj.resolved_by = None
-                        console.print(" [red]Validation failed — escalating[/red]")
+                        console.print(" [red]Validation failed \u2014 escalating[/red]")
                         if noninteractive:
-                            # Auto-resolve using judge's reasoning as constraint
                             auto_decision = validation.details or "Auto-resolved in headless mode (validation failure)"
                             case_obj.status = CaseStatus.USER_RESOLVED
                             case_obj.resolution = auto_decision
@@ -229,31 +220,25 @@ def _run_adversarial_loop(state, agents, session_mgr, config, noninteractive: bo
                             revised = legislator.revise(state, case_obj)
                             state.current_code = revised
                             state.code_history.append(revised)
-                            # Record in dedup store so same scenario is not re-processed
                             dedup_store.record(
                                 dedup_store.fingerprint(case_obj.scenario, state.moral_principles),
                                 state.session_id, case_obj.id,
-                                resolution=auto_decision, resolved_by="judge-auto"
+                                resolution=auto_decision, resolved_by="judge-auto",
                             )
                         else:
                             _escalate(state, case_obj, validation.details, legislator)
                         round_escalated += 1
                 else:
-                    # No prior cases to validate against, or no proposed revision
                     case_obj.resolution = result.resolution_summary or result.reasoning
                     case_obj.status = CaseStatus.AUTO_RESOLVED
                     case_obj.resolved_by = "judge"
-
                     revised = legislator.revise(state, case_obj)
                     state.current_code = revised
                     state.code_history.append(revised)
-                    console.print(
-                        f" [green]Resolved → Code v{revised.version}[/green]"
-                    )
+                    console.print(f" [green]Resolved \u2192 Code v{revised.version}[/green]")
                     round_auto += 1
             else:
-                # Unresolvable — escalate to user
-                console.print(" [red bold]Cannot resolve — escalating to you[/red bold]")
+                console.print(" [red bold]Cannot resolve \u2014 escalating to you[/red bold]")
                 if noninteractive:
                     auto_decision = result.conflict_explanation or result.reasoning or "Auto-escalated in headless mode"
                     case_obj.status = CaseStatus.USER_RESOLVED
@@ -266,22 +251,19 @@ def _run_adversarial_loop(state, agents, session_mgr, config, noninteractive: bo
                     dedup_store.record(
                         dedup_store.fingerprint(case_obj.scenario, state.moral_principles),
                         state.session_id, case_obj.id,
-                        resolution=auto_decision, resolved_by="judge-auto"
+                        resolution=auto_decision, resolved_by="judge-auto",
                     )
                 else:
                     _escalate(state, case_obj, result.conflict_explanation or result.reasoning, legislator)
                 round_escalated += 1
 
             session_mgr.save(state)
-            # Enforce context window after each state change
             enforce_context_window(state, agents["judge"].llm, config["loop"]["max_context_tokens"])
 
-        # Round summary
-        _display_round_summary(state, len(all_cases), round_auto, round_escalated)
+        _display_round_summary(state, len(all_round_cases), round_auto, round_escalated)
 
-        # Continue?
         if noninteractive:
-            pass  # auto-continue in noninteractive mode
+            pass
         else:
             action = Prompt.ask(
                 "[bold]Next?[/bold]",
@@ -301,11 +283,8 @@ def _run_adversarial_loop(state, agents, session_mgr, config, noninteractive: bo
         f"[bold]Final stats:[/bold] {len(state.cases)} cases over "
         f"{state.current_round} rounds, code at v{state.current_code.version}"
     )
-    console.print(
-        f"[dim]Session saved to: sessions/{state.session_id}/[/dim]"
-    )
+    console.print(f"[dim]Session saved to: sessions/{state.session_id}/[/dim]")
 
-    # Cost report
     from loophole.cost_tracker import get_tracker
     tracker = get_tracker()
     try:
@@ -318,7 +297,6 @@ def _run_adversarial_loop(state, agents, session_mgr, config, noninteractive: bo
     except Exception as e:
         print(f"[WARN] Could not generate cost report: {e}")
 
-    # Generate HTML report
     from loophole.visualize import generate_html
     report_path = generate_html(state)
     console.print(f"[bold blue]HTML report:[/bold blue] {report_path}")

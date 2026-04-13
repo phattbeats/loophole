@@ -6,6 +6,12 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 
+class RoundType(str, Enum):
+    OPENING = "opening"   # General adversarial search
+    ATTACK = "attack"     # Targeted refinement based on prior findings
+    CLOSING = "closing"   # Final synthesis — judge weighs these most heavily
+
+
 class CaseType(str, Enum):
     LOOPHOLE = "loophole"  # Legal but immoral
     OVERREACH = "overreach"  # Illegal but moral
@@ -21,6 +27,7 @@ class CaseStatus(str, Enum):
 class Case(BaseModel):
     id: int
     round: int
+    round_type: RoundType = RoundType.OPENING
     case_type: CaseType
     scenario: str
     explanation: str
@@ -47,6 +54,7 @@ class SessionState(BaseModel):
     cases: list[Case] = Field(default_factory=list)
     case_summaries: list[str] = Field(default_factory=list)  # Summaries of pruned resolved cases
     current_round: int = 0
+    current_round_type: RoundType = RoundType.OPENING  # current phase within the round
     created_at: datetime = Field(default_factory=datetime.now)
 
     @property

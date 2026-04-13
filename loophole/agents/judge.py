@@ -5,18 +5,22 @@ from dataclasses import dataclass
 from typing import Any
 
 from loophole.agents.base import BaseAgent
-from loophole.models import Case, SessionState
-from loophole.prompts import JUDGE_RESOLVE, JUDGE_SYSTEM, JUDGE_VALIDATE
+from loophole.models import Case, RoundType, SessionState
+from loophole.prompts import (
+    JUDGE_RESOLVE,
+    JUDGE_SYSTEM,
+    JUDGE_SYSTEM_CLOSING,
+    JUDGE_SYSTEM_DEFAULT,
+    JUDGE_VALIDATE,
+)
 
 
 def _format_resolved_cases(state: SessionState) -> str:
     parts = []
-    # Summaries first, if any
     if state.case_summaries:
         parts.append("Summarized earlier cases (concise):")
         parts.extend(state.case_summaries)
-        parts.append("")  # blank line
-    # Full resolved cases (recent ones)
+        parts.append("")
     full_cases = state.resolved_cases
     if not full_cases:
         if not parts:
@@ -49,8 +53,12 @@ class ValidationResult:
 
 
 class Judge(BaseAgent):
-    def _build_system_prompt(self, **kwargs: Any) -> str:
-        return JUDGE_SYSTEM
+    def _build_system_prompt(self, round_type: RoundType = RoundType.OPENING, **kwargs: Any) -> str:
+        closing_instr = JUDGE_SYSTEM_CLOSING if round_type == RoundType.CLOSING else JUDGE_SYSTEM_DEFAULT
+        return JUDGE_SYSTEM.format(
+            round_type=round_type.value.upper(),
+            closing_instruction=closing_instr,
+        )
 
     def _build_user_message(self, state: SessionState, **kwargs: Any) -> str:
         case: Case = kwargs["case"]
@@ -65,8 +73,8 @@ class Judge(BaseAgent):
             resolved_cases_text=_format_resolved_cases(state),
         )
 
-    def evaluate(self, state: SessionState, case: Case) -> JudgeResult:
-        raw = self.run(state, case=case)
+    def evaluate(self, state: SessionState, case: Case, round_type: RoundType = RoundType.OPENING) -> JudgeResult:
+        raw = self.run(state, round_type=round_type, case=case)
 
         verdict_match = re.search(r"<verdict>\s*(.*?)\s*</verdict>", raw, re.DOTALL)
         verdict = verdict_match.group(1).strip().lower() if verdict_match else "unresolvable"
@@ -95,7 +103,10 @@ class Judge(BaseAgent):
             proposed_code=proposed_code,
             resolved_cases_text=_format_resolved_cases(state),
         )
-        raw = self.llm.call(JUDGE_SYSTEM, user_msg, temperature=self.temperature)
+        raw = self.llm.call(JUDGE_SYSTEM.format(
+            round_type="validation",
+            closing_instruction="",
+        ), user_msg, temperature=self.temperature)
 
         passes_match = re.search(r"<passes>\s*(.*?)\s*</passes>", raw, re.DOTALL)
         passes = passes_match.group(1).strip().lower() == "true" if passes_match else False
