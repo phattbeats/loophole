@@ -373,3 +373,44 @@ async def health_check():
 
 if __name__ == "__main__":
     uvicorn.run(api, host="0.0.0.0", port=8000)
+# ─── Cost Tracking Endpoints ──────────────────────────────────────────────────
+
+@api.get("/costs", response_model=dict)
+async def get_global_costs(token: str = Depends(verify_token)):
+    """Global cost totals across all sessions."""
+    from loophole.cost_tracker import get_tracker
+    tracker = get_tracker()
+    return tracker.global_totals()
+
+@api.get("/costs/sessions")
+async def list_session_costs(token: str = Depends(verify_token)):
+    """List all sessions with cost data."""
+    from loophole.cost_tracker import get_tracker
+    tracker = get_tracker()
+    index = tracker._load_global_index()
+    result = []
+    for sid in index:
+        data = tracker.session_total(sid)
+        result.append({
+            "session_id": sid,
+            "total_cost_usd": data["total_cost_usd"],
+            "total_calls": data["total_calls"],
+            "total_input_tokens": data["total_input_tokens"],
+            "total_output_tokens": data["total_output_tokens"],
+        })
+    return result
+
+@api.get("/sessions/{session_id}/costs", response_model=dict)
+async def get_session_costs(session_id: str, token: str = Depends(verify_token)):
+    """Cost breakdown for a specific session."""
+    from loophole.cost_tracker import get_tracker
+    tracker = get_tracker()
+    data = tracker.session_total(session_id)
+    return data
+
+@api.get("/sessions/{session_id}/costs/report")
+async def get_session_cost_report(session_id: str, token: str = Depends(verify_token)):
+    """Plain-text cost report for a session."""
+    from loophole.cost_tracker import get_tracker
+    tracker = get_tracker()
+    return {"report": tracker.report_session(session_id)}
