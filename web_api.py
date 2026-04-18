@@ -7,15 +7,18 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional
 import os
+import hashlib
+import time
 from pathlib import Path
 import sys
 
 # Add the loophole package to path
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, '/root/.openclaw/utilities/python-packages')
 
 from loophole.main import app as typer_app
 from loophole.session import SessionManager
-from loophole.models import SessionState, LegalCode, CaseStatus, CaseType
+from loophole.models import SessionState, LegalCode, CaseStatus, CaseType, RoundType
 from loophole.visualize import generate_html
 import uvicorn
 
@@ -86,6 +89,8 @@ class SessionDetailResponse(BaseModel):
 
 class SessionCreateRequest(BaseModel):
     domain: str
+    moral_principles: str
+    user_clarifications: Optional[str] = None
     principles_file: Optional[str] = None
     headless: bool = False
     rounds: int = 0
@@ -124,15 +129,38 @@ async def list_sessions(token: str = Depends(verify_token)):
 
 @api.post("/sessions", response_model=SessionInfo)
 async def create_session(request: SessionCreateRequest, token: str = Depends(verify_token)):
-    """Create a new session"""
-    # This would integrate with the typer app logic
-    # For now, returning a placeholder
-    return SessionInfo(
-        id="placeholder",
+    """Create a new Loophole session."""
+    from loophole.models import LegalCode
+    from loophole.agents.legislator import LegislatorAgent
+    from loophole.llm import LLMClient
+
+    import hashlib, time
+    # Generate a short deterministic session ID from domain + random suffix
+    raw = f"{request.domain}:{time.time_ns()}:{request.moral_principles[:50]}"
+    session_id = hashlib.sha256(raw.encode()).hexdigest()[:16]
+    config = session_manager._load_config() if hasattr(session_manager, '_load_config') else {}
+
+    # Draft initial legal code via legislator
+    try:
+        llm_client = LLMClient(model=config.get("model", "claude-3-5-sonnet-20241022"))
+        legislator = LegislatorAgent(llm_client, request.domain, request.moral_principles)
+        placeholder = f"Initial legal code for {request.domain}. Principles: {request.moral_principles[:200]}"
+        initial_code = legislator.draft_initial(placeholder)
+    except Exception as e:
+        initial_code = LegalCode(version=0, text="", changelog="Created via API")
+
+    state = session_manager.create_session(
+        session_id=session_id,
         domain=request.domain,
-        round=0,
-        cases=0,
-        code_version=1
+        principles=request.moral_principles,
+        initial_code=initial_code,
+    )
+    return SessionInfo(
+        id=state.session_id,
+        domain=state.domain,
+        round=state.current_round,
+        cases=len(state.cases),
+        code_version=state.current_code.version,
     )
 
 @api.get("/sessions/{session_id}", response_model=SessionDetailResponse)
@@ -414,3 +442,130 @@ async def get_session_cost_report(session_id: str, token: str = Depends(verify_t
     from loophole.cost_tracker import get_tracker
     tracker = get_tracker()
     return {"report": tracker.report_session(session_id)}
+
+@api.delete("/sessions/{session_id}")
+async def delete_session(session_id: str, token: str = Depends(verify_token)):
+    """Delete a session and all its data."""
+    import shutil
+    session_path = Path(SESSION_DIR) / session_id
+    if not session_path.exists():
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    shutil.rmtree(session_path)
+    # Also remove from SQLite if available
+    if session_manager._sqlite:
+        try:
+            session_manager._sqlite._conn.execute(
+                "DELETE FROM cases WHERE session_id = ?", (session_id,)
+            )
+            session_manager._sqlite._conn.execute(
+                "DELETE FROM case_summaries WHERE session_id = ?", (session_id,)
+            )
+            session_manager._sqlite._conn.execute(
+                "DELETE FROM responses WHERE session_id = ?", (session_id,)
+            )
+            session_manager._sqlite._conn.commit()
+        except Exception:
+            pass
+    return {"ok": True, "deleted": session_id}
+
+@api.post("/sessions/{session_id}/run")
+async def run_session_round(session_id: str, rounds: int = 1, token: str = Depends(verify_token)):
+    """
+    Trigger one or more rounds of the adversarial loop.
+    Note: Full agent-based loop is complex and requires the CLI run-loop.
+    This endpoint runs a simplified synchronous loop for one round.
+    """
+    try:
+        state = session_manager.load(session_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    try:
+        from loophole.llm import LLMClient
+        from loophole.agents.loophole_finder import LoopholeFinder
+        from loophole.agents.overreach_finder import OverreachFinder
+        from loophole.agents.judge import Judge
+        from loophole.agents.legislator import LegislatorAgent
+        from loophole.cost_tracker import get_tracker
+        from loophole.deduplication import DeduplicationStore
+        from loophole.models import RoundType
+        import yaml
+
+        with open("config.yaml") as f:
+            config = yaml.safe_load(f)
+
+        base_url = config["lite_llm"]["base_url"]
+        api_key = config["lite_llm"]["api_key"]
+        default_model = config["default_model"]
+        max_tokens = config["max_tokens"]
+        agent_models = config["agent_models"]
+        temps = config["temperatures"]
+        cases_per = config["loop"]["cases_per_agent"]
+
+        def make_client(agent_name: str) -> LLMClient:
+            model = agent_models.get(agent_name, default_model)
+            return LLMClient(base_url=base_url, api_key=api_key, model=model, max_tokens=max_tokens, role=agent_name)
+
+        loophole_finder = LoopholeFinder(make_client("loophole"), temperature=temps.get("loophole_finder", 0.9), cases_per_agent=cases_per)
+        overreach_finder = OverreachFinder(make_client("overreach"), temperature=temps.get("overreach_finder", 0.9), cases_per_agent=cases_per)
+        judge = Judge(make_client("judge"), temperature=temps.get("judge", 0.3))
+        legislator = LegislatorAgent(make_client("legislator"), temperature=temps.get("legislator", 0.4))
+
+        tracker = get_tracker()
+        tracker.start_session(session_id)
+
+        max_rounds = config["loop"]["max_rounds"]
+        if state.current_round >= max_rounds:
+            return {"session_id": session_id, "rounds_completed": 0, "error": "max rounds reached", "current_round": state.current_round}
+
+        state.current_round += 1
+        phases = [RoundType.OPENING, RoundType.ATTACK, RoundType.CLOSING]
+        all_round_cases = []
+        dedup_store = DeduplicationStore()
+
+        for phase in phases:
+            state.current_round_type = phase
+            loopholes = loophole_finder.find(state, round_type=phase)
+            overreaches = overreach_finder.find(state, round_type=phase)
+            for c in loopholes + overreaches:
+                fp = dedup_store.fingerprint(c.scenario, state.moral_principles)
+                if dedup_store.is_duplicate(fp):
+                    continue
+                dedup_store.record(fp, state.session_id, c.id)
+                all_round_cases.append(c)
+
+        auto_resolved = 0
+        escalated = 0
+        for case_obj in all_round_cases:
+            state.cases.append(case_obj)
+            result = judge.evaluate(state, case_obj, round_type=case_obj.round_type)
+            if result.resolvable and result.proposed_revision:
+                case_obj.resolution = result.resolution_summary or result.reasoning
+                case_obj.status = CaseStatus.AUTO_RESOLVED
+                case_obj.resolved_by = "judge"
+                revised = legislator.revise(state, case_obj)
+                validation = judge.validate(state, revised.text)
+                if validation.passes:
+                    state.current_code = revised
+                    auto_resolved += 1
+                else:
+                    case_obj.status = CaseStatus.ESCALATED
+                    escalated += 1
+            else:
+                case_obj.status = CaseStatus.ESCALATED
+                escalated += 1
+
+        session_manager.save(state)
+        return {
+            "session_id": session_id,
+            "rounds_completed": 1,
+            "current_round": state.current_round,
+            "cases_found": len(all_round_cases),
+            "auto_resolved": auto_resolved,
+            "escalated": escalated,
+            "code_version": state.current_code.version,
+        }
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=f"Config or session file not found: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Run error: {str(e)}")
