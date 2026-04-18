@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loophole — Adversarial Legal Drafting</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=JetBrains+Mono:wght@700&family=Nunito:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/loophole.css">
+</head>
+<body>
+
+<!-- Dashboard View -->
+<div id="view-dashboard" class="view">
+  <header class="app-header">
+    <h1 class="app-title">LOOPHOLE</h1>
+    <p class="app-tagline">Adversarial Legal Drafting Engine</p>
+  </header>
+
+  <div class="content">
+    <div class="section-header">
+      <h2>Sessions</h2>
+      <button class="btn btn-primary" onclick="showCreateForm()">+ New Session</button>
+    </div>
+
+    <!-- Create Session Form -->
+    <div id="create-form" class="card hidden" style="margin-bottom:2rem;">
+      <h3>Create Session</h3>
+      <form id="form-new-session" onsubmit="createSession(event)">
+        <div class="form-group">
+          <label>Domain / Subject</label>
+          <input name="domain" placeholder="e.g. Employee Surveillance Policy" required>
+        </div>
+        <div class="form-group">
+          <label>Moral Principles</label>
+          <textarea name="moral_principles" rows="4" placeholder="Define the ethical framework... (e.g. employees have right to privacy, data minimization, consent required)" required></textarea>
+        </div>
+        <div class="form-group">
+          <label>User Clarifications <span class="optional">(optional)</span></label>
+          <textarea name="user_clarifications" rows="2" placeholder="Any specific constraints or context..."></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Create Session</button>
+          <button type="button" class="btn" onclick="hideCreateForm()">Cancel</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Sessions Table -->
+    <div id="sessions-table-wrap">
+      <div class="spinner" id="loading-sessions"></div>
+      <table id="sessions-table" class="hidden">
+        <thead>
+          <tr>
+            <th>Session ID</th>
+            <th>Domain</th>
+            <th>Round</th>
+            <th>Cases</th>
+            <th>Code v.</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="sessions-tbody"></tbody>
+      </table>
+      <p id="no-sessions" class="hidden empty-state">No sessions found. Create one above.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Session Detail View -->
+<div id="view-session" class="view hidden">
+  <header class="app-header">
+    <button class="back-btn" onclick="showDashboard()">← Dashboard</button>
+    <div>
+      <h1 class="app-title" id="session-title">Session</h1>
+      <p class="app-tagline" id="session-meta"></p>
+    </div>
+    <button class="btn btn-danger" id="btn-delete-session" onclick="deleteCurrentSession()">Delete</button>
+  </header>
+
+  <div class="content">
+    <!-- Run Controls -->
+    <div class="card" id="run-controls" style="margin-bottom:1.5rem;">
+      <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="btn-run" onclick="runSession()">▶ Run Round</button>
+        <span id="run-status" class="run-status"></span>
+      </div>
+    </div>
+
+    <!-- Legal Code -->
+    <div class="card" style="margin-bottom:1.5rem;">
+      <div class="card-header">
+        <h3>Legal Code <span id="code-version"></span></h3>
+      </div>
+      <pre id="legal-code-text" class="code-block"></pre>
+    </div>
+
+    <!-- Case Board -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Case Board</h3>
+      </div>
+      <div id="case-list"></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/static/js/loophole.js"></script>
+</body>
+</html>

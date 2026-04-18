@@ -20,6 +20,7 @@ from loophole.main import app as typer_app
 from loophole.session import SessionManager
 from loophole.models import SessionState, LegalCode, CaseStatus, CaseType, RoundType
 from loophole.visualize import generate_html
+from fastapi.staticfiles import StaticFiles
 import uvicorn
 
 # Initialize FastAPI app
@@ -398,6 +399,11 @@ async def visualize_session(session_id: str, token: str = Depends(verify_token))
 @api.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+# Mount static files
+static_dir = Path(__file__).parent / "static"
+if static_dir.exists():
+    api.mount("/static", StaticFiles(directory=str(static_dir), html=True), name="static")
 
 if __name__ == "__main__":
     uvicorn.run(api, host="0.0.0.0", port=8000)
