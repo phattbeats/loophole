@@ -24,6 +24,19 @@ class CaseStatus(str, Enum):
     USER_RESOLVED = "user_resolved"
 
 
+class VoteValue(str, Enum):
+    UPHOLD = "uphold"
+    OVERTURN = "overturn"
+    ABSTAIN = "abstain"
+
+
+class OutsideVote(BaseModel):
+    voter_id: str
+    vote: VoteValue
+    confidence: int = Field(ge=1, le=5, description="Confidence level 1-5")
+    voted_at: datetime = Field(default_factory=datetime.now)
+
+
 class Case(BaseModel):
     id: int
     round: int
@@ -34,6 +47,7 @@ class Case(BaseModel):
     status: CaseStatus = CaseStatus.PENDING
     resolution: str | None = None
     resolved_by: str | None = None  # "judge" or "user"
+    outside_votes: list[OutsideVote] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
 
 

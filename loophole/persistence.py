@@ -47,6 +47,15 @@ CREATE TABLE IF NOT EXISTS cases (
     created_at     TEXT    NOT NULL   -- ISO-8601
 );
 
+CREATE TABLE IF NOT EXISTS outside_votes (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    case_id     INTEGER NOT NULL REFERENCES cases(id),
+    voter_id    TEXT    NOT NULL,
+    vote        TEXT    NOT NULL,   -- 'uphold' | 'overturn' | 'abstain'
+    confidence  INTEGER NOT NULL,   -- 1-5
+    created_at  TEXT    NOT NULL   -- ISO-8601
+);
+
 CREATE TABLE IF NOT EXISTS votes (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     case_id     INTEGER NOT NULL REFERENCES cases(id),
@@ -81,6 +90,7 @@ CREATE INDEX IF NOT EXISTS idx_cases_status     ON cases(status);
 CREATE INDEX IF NOT EXISTS idx_cases_type        ON cases(case_type);
 CREATE INDEX IF NOT EXISTS idx_cases_created    ON cases(created_at);
 CREATE INDEX IF NOT EXISTS idx_votes_case       ON votes(case_id);
+CREATE INDEX IF NOT EXISTS idx_outside_votes_case ON outside_votes(case_id);
 CREATE INDEX IF NOT EXISTS idx_agent_sess       ON agent_sessions(session_id, round);
 """
 
@@ -285,6 +295,32 @@ class SQLiteStore:
             return conn.execute(
                 "SELECT * FROM votes WHERE case_id=?", (case_id,),
             ).fetchall()
+
+    # ---- Outside Votes -----------------------------------------------------
+
+    def record_outside_vote(
+        self,
+        case_id: int,
+        voter_id: str,
+        vote: str,
+        confidence: int,
+    ) -> None:
+        """Record an outside observer's vote on a case."""
+        with self._conn() as conn:
+            conn.execute("""
+                INSERT INTO outside_votes (case_id, voter_id, vote, confidence, created_at)
+                VALUES (?, ?, ?, ?, ?)
+            """, (case_id, voter_id, vote, confidence, _dt_to_str(datetime.now())))
+            conn.commit()
+
+    def get_outside_votes(self, case_id: int) -> list[dict]:
+        """Get all outside votes for a case."""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT voter_id, vote, confidence, created_at FROM outside_votes WHERE case_id=? ORDER BY created_at",
+                (case_id,),
+            ).fetchall()
+            return [dict(row) for row in rows]
 
     # ---- Agent sessions (audit log) ----------------------------------------
 

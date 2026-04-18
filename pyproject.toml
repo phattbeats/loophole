@@ -9,7 +9,10 @@ dependencies = [
     "rich>=13.0",
     "typer>=0.9",
     "pyyaml>=6.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.25.0",
 ]
 
 [project.scripts]
 loophole = "loophole.main:app"
+loophole-api = "loophole.web_api:api"
