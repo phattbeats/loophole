@@ -1,8 +1,9 @@
 """Deduplication module for Loophole sessions.
 
 Prevents processing the same scenario multiple times by fingerprinting
-each case (scenario + moral principles) and maintaining a persistent
-index of seen cases across runs.
+each case by scenario text only. Moral principles are excluded because
+they can legitimately differ between runs — the same scenario may be argued
+from different moral frameworks without being a duplicate case.
 
 Storage format: JSON file mapping fingerprint -> {
     "session_id": str,
@@ -71,7 +72,7 @@ class DeduplicationStore:
         Combines scenario and moral principles to differentiate across contexts.
         Normalizes whitespace to avoid trivial differences.
         """
-        combined = f"{moral_principles.strip()}\n---\n{scenario.strip()}"
+        combined = scenario.strip()
         # Normalize: collapse multiple spaces, strip line-end whitespace
         combined = " ".join(combined.split())
         return hashlib.sha256(combined.encode("utf-8")).hexdigest()
