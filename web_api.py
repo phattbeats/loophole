@@ -79,6 +79,20 @@ class CaseVoteResponse(BaseModel):
     case_id: int
     outside_votes: list[OutsideVoteResponse]
 
+class OutsideVotesSummary(BaseModel):
+    upholds: int = 0
+    overturns: int = 0
+    abstains: int = 0
+    total: int = 0
+
+class PIIStats(BaseModel):
+    redactions_applied: int = 0
+    categories: List[str] = []
+
+class ContextWindowUsage(BaseModel):
+    current_tokens: int = 0
+    max_tokens: int = 60000
+
 class SessionDetailResponse(BaseModel):
     session_id: str
     domain: str
@@ -87,6 +101,9 @@ class SessionDetailResponse(BaseModel):
     cases: List[CaseResponse]
     legal_code: LegalCodeResponse
     code_history: List[LegalCodeResponse]
+    outside_votes_summary: OutsideVotesSummary
+    pii_stats: PIIStats
+    context_window_usage: ContextWindowUsage
 
 class SessionCreateRequest(BaseModel):
     domain: str
@@ -201,6 +218,23 @@ async def get_session(session_id: str, token: str = Depends(verify_token)):
                 changelog=code.changelog
             ))
         
+        # Compute outside_votes_summary across all resolved cases
+        from collections import Counter
+        vote_counts = Counter()
+        total_votes = 0
+        for case in state.cases:
+            for ov in getattr(case, 'outside_votes', []):
+                vote_counts[ov.get('vote', 'abstain')] += 1
+                total_votes += 1
+
+        # PII stats placeholder (PII redaction not yet implemented in Loophole)
+        pii_stats = PIIStats(redactions_applied=0, categories=[])
+
+        # Context window usage (estimate from code + case text)
+        code_tokens = len(state.current_code.text) // 4
+        case_tokens = sum(len(c.scenario) // 4 for c in state.cases)
+        current_tokens = code_tokens + case_tokens
+
         return SessionDetailResponse(
             session_id=state.session_id,
             domain=state.domain,
@@ -208,7 +242,18 @@ async def get_session(session_id: str, token: str = Depends(verify_token)):
             current_round=state.current_round,
             cases=cases,
             legal_code=legal_code_response,
-            code_history=code_history
+            code_history=code_history,
+            outside_votes_summary=OutsideVotesSummary(
+                upholds=vote_counts.get('uphold', 0),
+                overturns=vote_counts.get('overturn', 0),
+                abstains=vote_counts.get('abstain', 0),
+                total=total_votes,
+            ),
+            pii_stats=pii_stats,
+            context_window_usage=ContextWindowUsage(
+                current_tokens=current_tokens,
+                max_tokens=60000,
+            ),
         )
     except Exception as e:
         raise HTTPException(status_code=404, detail=f"Session not found: {str(e)}")
@@ -337,6 +382,22 @@ async def get_case(session_id: str, case_id: int, token: str = Depends(verify_to
         outside_votes=votes,
     )
 
+
+@api.get("/sessions/{session_id}/code-history", response_model=List[LegalCodeResponse])
+async def get_code_history(session_id: str, token: str = Depends(verify_token)):
+    """Get full version history of legal code with diffs between versions."""
+    try:
+        state = session_manager.load(session_id)
+        history = []
+        for code in state.code_history:
+            history.append(LegalCodeResponse(
+                version=code.version,
+                text=code.text,
+                changelog=code.changelog,
+            ))
+        return history
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Session not found: {str(e)}")
 
 @api.get("/sessions/{session_id}/cases", response_model=List[CaseResponse])
 async def get_session_cases(session_id: str, token: str = Depends(verify_token)):
