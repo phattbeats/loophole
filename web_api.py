@@ -449,6 +449,58 @@ async def get_session_cost_report(session_id: str, token: str = Depends(verify_t
     tracker = get_tracker()
     return {"report": tracker.report_session(session_id)}
 
+@api.get("/sessions/{session_id}/cost-summary", response_model=dict)
+async def get_session_cost_summary(session_id: str, token: str = Depends(verify_token)):
+    """Overall session cost stats: total, cost per round, cost per case."""
+    from loophole.cost_tracker import get_tracker
+    tracker = get_tracker()
+    cost_data = tracker.session_total(session_id)
+
+    # Load session state for round/case counts
+    session_path = Path(SESSION_DIR) / session_id
+    state_file = session_path / "state.json"
+    current_round = 1
+    case_count = 0
+    if state_file.exists():
+        try:
+            import json as _json
+            state = _json.loads(state_file.read_text())
+            current_round = state.get("current_round", 1) or 1
+            cases = state.get("cases", [])
+            case_count = len(cases)
+        except Exception:
+            pass
+
+    return {
+        "session_id": session_id,
+        "total_cost_usd": cost_data["total_cost_usd"],
+        "total_calls": cost_data["total_calls"],
+        "total_input_tokens": cost_data["total_input_tokens"],
+        "total_output_tokens": cost_data["total_output_tokens"],
+        "rounds": current_round,
+        "cases": case_count,
+        "cost_per_round_usd": round(cost_data["total_cost_usd"] / max(current_round, 1), 6),
+        "cost_per_case_usd": round(cost_data["total_cost_usd"] / max(case_count, 1), 6),
+    }
+
+@api.get("/costs/all", response_model=dict)
+async def get_all_session_costs(token: str = Depends(verify_token)):
+    """All sessions cost summary — same as /costs/sessions but at the canonical path."""
+    from loophole.cost_tracker import get_tracker
+    tracker = get_tracker()
+    index = tracker._load_global_index()
+    result = []
+    for sid in index:
+        data = tracker.session_total(sid)
+        result.append({
+            "session_id": sid,
+            "total_cost_usd": data["total_cost_usd"],
+            "total_calls": data["total_calls"],
+            "total_input_tokens": data["total_input_tokens"],
+            "total_output_tokens": data["total_output_tokens"],
+        })
+    return {"sessions": result, "count": len(result)}}
+
 @api.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, token: str = Depends(verify_token)):
     """Delete a session and all its data."""
