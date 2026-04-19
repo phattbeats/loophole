@@ -689,3 +689,134 @@ async def run_session_round(session_id: str, rounds: int = 1, token: str = Depen
         raise HTTPException(status_code=500, detail=f"Config or session file not found: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Run error: {str(e)}")
+
+# ─── Chat Command Interface ─────────────────────────────────────────────────────
+
+@api.post("/sessions/{session_id}/chat")
+async def chat_command(session_id: str, cmd: dict, token: str = Depends(verify_token)):
+    """
+    Natural language command interface for agents.
+    Accepts: { "command": "...", "agent_id": "..." }
+    Returns: { "agent_id": "...", "response": "...", "action": "...", "data": {...} }
+    """
+    command = (cmd.get("command") or "").strip().lower()
+    agent_id = cmd.get("agent_id", "agent")
+
+    if not command:
+        return {
+            "agent_id": agent_id,
+            "response": "I didn't receive a command. Try something like 'run 3 more rounds' or 'show me the latest loopholes'.",
+            "action": "none",
+            "data": {},
+        }
+
+    # Load session
+    try:
+        state = session_manager.load(session_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    tracker = get_tracker()
+
+    # ── Run rounds ──────────────────────────────────────────────────────────
+    if any(kw in command for kw in ["run", "execute", "go", "start"]):
+        import re
+        m = re.search(r'(\d+)\s*(round|rounds)?', command)
+        rounds = int(m.group(1)) if m else 1
+        if rounds > 10:
+            rounds = 10  # cap
+        results = []
+        for _ in range(rounds):
+            # Use the existing run logic (simplified single-round call)
+            # Trigger one round via the existing run mechanism
+            result = await run_session_round(session_id, rounds=1, token=token)
+            results.append(result)
+            if result.get("error"):
+                break
+        total_cases = sum(r.get("cases_found", 0) for r in results)
+        total_resolved = sum(r.get("auto_resolved", 0) for r in results)
+        response = (
+            f"Ran {len(results)} round(s). "
+            f"Found {total_cases} cases. "
+            f"Auto-resolved {total_resolved}. "
+            f"Now at round {results[-1].get('current_round', state.current_round)}."
+        )
+        return {"agent_id": agent_id, "response": response, "action": "run_rounds", "data": results}
+
+    # ── Show latest loopholes / cases ───────────────────────────────────────
+    if any(kw in command for kw in ["loophole", "case", "latest", "show", "list"]):
+        cases = state.cases[-10:]  # last 10
+        if not cases:
+            response = "No cases found yet. Run a round first."
+        else:
+            lines = [f"Round {c.round}: [{c.status.value}] {c.scenario[:80]}" for c in cases]
+            response = "Latest cases:\n" + "\n".join(lines)
+        return {"agent_id": agent_id, "response": response, "action": "show_cases", "data": {"cases": [{
+            "id": c.id, "round": c.round, "scenario": c.scenario,
+            "status": c.status.value, "resolution": c.resolution
+        } for c in cases[-10:]]}}
+
+    # ── Show legal code ──────────────────────────────────────────────────────
+    if any(kw in command for kw in ["legal", "code", "statute", "law"]):
+        code_text = state.current_code.text if state.current_code else "(no legal code yet)"
+        version = state.current_code.version if state.current_code else 0
+        response = f"Legal Code v{version}:\n\n{code_text[:500]}"
+        if len(code_text) > 500:
+            response += "\n\n[truncated]"
+        return {"agent_id": agent_id, "response": response, "action": "show_code", "data": {
+            "version": version, "text": code_text[:500]}}
+
+    # ── Cost / spending ─────────────────────────────────────────────────────
+    if any(kw in command for kw in ["cost", "spend", "expensive", "cheap", "token"]):
+        data = tracker.session_total(session_id)
+        response = (
+            f"Session cost: ${data['total_cost_usd']:.6f} \n"
+            f"Tokens: {data['total_input_tokens']:,} in / {data['total_output_tokens']:,} out\n"
+            f"LLM calls: {data['total_calls']}"
+        )
+        by_agent = data.get("by_agent", {})
+        if by_agent:
+            lines = [f"  {role}: ${d['cost_usd']:.6f} ({d['calls']} calls)"
+                     for role, d in by_agent.items()]
+            response += "\nBy agent:\n" + "\n".join(lines)
+        return {"agent_id": agent_id, "response": response, "action": "show_costs", "data": data}
+
+    # ── Status / summary ────────────────────────────────────────────────────
+    if any(kw in command for kw in ["status", "summary", "what", "how", "where", "report"]):
+        code_ver = state.current_code.version if state.current_code else 0
+        case_count = len(state.cases)
+        escalated = len([c for c in state.cases if c.status.value == "escalated"])
+        resolved = len([c for c in state.cases if c.status.value == "auto_resolved"])
+        cost_data = tracker.session_total(session_id)
+        response = (
+            f"Session status:\n"
+            f"  Round: {state.current_round}\n"
+            f"  Legal code v{code_ver}\n"
+            f"  Cases: {case_count} total ({resolved} resolved, {escalated} escalated)\n"
+            f"  Cost: ${cost_data['total_cost_usd']:.6f}"
+        )
+        return {"agent_id": agent_id, "response": response, "action": "status", "data": {
+            "round": state.current_round, "case_count": case_count,
+            "escalated": escalated, "resolved": resolved,
+            "cost": cost_data["total_cost_usd"]}}
+
+    # ── Help ────────────────────────────────────────────────────────────────
+    if any(kw in command for kw in ["help", "what can", "command", "?"]):
+        response = (
+            "Available commands:\n"
+            "  run [N] rounds — execute N rounds of the adversarial loop\n"
+            "  show cases / latest loopholes — list recent cases\n"
+            "  show legal code — display the current legal code\n"
+            "  cost / how much — session cost breakdown\n"
+            "  status / summary — current session status\n"
+            "  help — this message"
+        )
+        return {"agent_id": agent_id, "response": response, "action": "help", "data": {}}
+
+    # ── Fallback ────────────────────────────────────────────────────────────
+    return {
+        "agent_id": agent_id,
+        "response": f"I didn't understand '{command}'. Try 'help' for available commands.",
+        "action": "none",
+        "data": {},
+    }
