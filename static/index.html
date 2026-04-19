@@ -96,6 +96,19 @@
       <pre id="legal-code-text" class="code-block"></pre>
     </div>
 
+    <!-- Activity Log / Agent Chat -->
+    <div class="card" id="log-panel" style="margin-bottom:1.5rem;">
+      <div class="card-header">
+        <h3>Activity Log</h3>
+        <button class="btn" style="font-size:12px;padding:0.3rem 0.6rem" onclick="toggleLogPanel()">Toggle</button>
+      </div>
+      <div id="activity-log" style="max-height:200px;overflow-y:auto;background:var(--bg);border-radius:8px;padding:0.75rem;font-family:var(--font-mono);font-size:13px;line-height:1.6;"></div>
+      <div style="margin-top:0.75rem;display:flex;gap:0.5rem;">
+        <input id="agent-cmd" type="text" placeholder="Agent command (e.g. run, status, export)" style="flex:1;background:var(--surface-elevated);border:2px solid transparent;color:var(--white);font-family:var(--font-mono);font-size:13px;padding:0.5rem 0.75rem;border-radius:8px;outline:none;" onkeydown="if(event.key==='Enter')submitAgentCmd()">
+        <button class="btn btn-primary" style="padding:0.5rem 1rem;font-size:13px" onclick="submitAgentCmd()">Send</button>
+      </div>
+    </div>
+
     <!-- Case Board -->
     <div class="card">
       <div class="card-header">

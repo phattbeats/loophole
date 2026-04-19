@@ -1,5 +1,7 @@
 const API = '/api';
 let currentSession = null;
+let activityLog = [];  // activity log entries
+let logPanelVisible = true;
 
 function toast(msg) {
   const t = document.getElementById('toast');
@@ -13,7 +15,7 @@ function showView(id) {
 }
 
 function showDashboard() { showView('dashboard'); currentSession = null; loadSessions(); }
-function showSession(id) { showView('session'); currentSession = id; loadSessionDetail(id); }
+function showSession(id) { showView('session'); currentSession = id; activityLog = []; log('Session loaded: ' + id.substring(0,12) + '...', 'ok'); loadSessionDetail(id); }
 
 function showCreateForm() { document.getElementById('create-form').classList.remove('hidden'); }
 function hideCreateForm() { document.getElementById('create-form').classList.add('hidden'); document.getElementById('form-new-session').reset(); }
@@ -70,7 +72,7 @@ async function createSession(e) {
     });
     if (!res.ok) throw new Error('Failed: ' + (await res.text()));
     const session = await res.json();
-    toast('Session created: ' + session.id);
+    log('Session created: ' + session.id.substring(0,12) + '...', 'ok'); toast('Session created: ' + session.id);
     hideCreateForm();
     loadSessions();
     showSession(session.id);
@@ -163,7 +165,7 @@ async function runSession() {
     if (!res.ok) throw new Error(await res.text());
     const result = await res.json();
     status.textContent = `Round ${result.current_round} done · ${result.cases_found} cases · ${result.auto_resolved} resolved`;
-    toast('Round complete');
+    log('Round complete. Cases: ' + result.cases_found + ', resolved: ' + result.auto_resolved, 'ok'); toast('Round complete');
     await loadSessionDetail(currentSession);
   } catch (e) {
     status.textContent = 'Error: ' + e.message;
@@ -176,6 +178,49 @@ async function runSession() {
 function esc(s) {
   if (!s) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function log(msg, type) {
+  activityLog.push({ts: Date.now(), msg, type: type || 'info'});
+  const el = document.getElementById('activity-log');
+  if (!el) return;
+  const prefix = type === 'error' ? '❌' : type === 'ok' ? '✅' : '  ';
+  el.innerHTML += '<div style="color:var(--' + (type === 'error' ? 'wrong' : type === 'ok' ? 'correct' : 'text-secondary') + ')">' + prefix + esc(msg) + '</div>';
+  el.scrollTop = el.scrollHeight;
+}
+
+function toggleLogPanel() {
+  logPanelVisible = !logPanelVisible;
+  const el = document.getElementById('activity-log');
+  if (el) el.style.display = logPanelVisible ? 'block' : 'none';
+}
+
+async function submitAgentCmd() {
+  const input = document.getElementById('agent-cmd');
+  if (!input) return;
+  const cmd = input.value.trim();
+  if (!cmd) return;
+  log('> ' + cmd, 'info');
+  input.value = '';
+  try {
+    // Simple command interface: run, status, export
+    if (cmd === 'run' || cmd === 'r') {
+      await runSession();
+    } else if (cmd === 'status') {
+      log('Round: ' + (window._sessionRound || '?') + ' | Cases: ' + (window._sessionCases || '?'), 'info');
+    } else if (cmd === 'export') {
+      const code = document.getElementById('legal-code-text').textContent;
+      if (code) {
+        navigator.clipboard.writeText(code).then(() => log('Legal code copied to clipboard', 'ok')).catch(() => log('Copy failed', 'error'));
+      }
+    } else if (cmd.startsWith('run ')) {
+      log('Note: multi-round run not yet implemented via UI. Use /run endpoint directly.', 'info');
+    } else {
+      log('Unknown command. Available: run, status, export', 'error');
+    }
+  } catch(e) {
+    log('Error: ' + e.message, 'error');
+  }
 }
 
 // Init
