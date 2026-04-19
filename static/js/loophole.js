@@ -202,24 +202,23 @@ async function submitAgentCmd() {
   if (!cmd) return;
   log('> ' + cmd, 'info');
   input.value = '';
+  input.disabled = true;
   try {
-    // Simple command interface: run, status, export
-    if (cmd === 'run' || cmd === 'r') {
-      await runSession();
-    } else if (cmd === 'status') {
-      log('Round: ' + (window._sessionRound || '?') + ' | Cases: ' + (window._sessionCases || '?'), 'info');
-    } else if (cmd === 'export') {
-      const code = document.getElementById('legal-code-text').textContent;
-      if (code) {
-        navigator.clipboard.writeText(code).then(() => log('Legal code copied to clipboard', 'ok')).catch(() => log('Copy failed', 'error'));
-      }
-    } else if (cmd.startsWith('run ')) {
-      log('Note: multi-round run not yet implemented via UI. Use /run endpoint directly.', 'info');
-    } else {
-      log('Unknown command. Available: run, status, export', 'error');
+    const res = await fetch(API + '/sessions/' + currentSession + '/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({command: cmd, agent_id: 'web-ui'}),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json();
+    log(data.response.replace(/\n/g, '  '), data.action === 'none' ? 'error' : 'ok');
+    if (data.action === 'run_rounds' || data.action === 'status') {
+      loadSessionDetail(currentSession);  // refresh session state after run/status
     }
   } catch(e) {
     log('Error: ' + e.message, 'error');
+  } finally {
+    input.disabled = false;
   }
 }
 
