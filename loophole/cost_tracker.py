@@ -28,7 +28,15 @@ DEFAULT_PRICING = {
     "gpt-4o-mini": {"input_per_1k": 0.15, "output_per_1k": 0.60},
     # GPT-4 Turbo
     "gpt-4-turbo": {"input_per_1k": 10.00, "output_per_1k": 30.00},
-    # Claude via LiteLLM
+    # Claude 4 family (via LiteLLM)
+    "claude-opus-4-7": {"input_per_1k": 3.00, "output_per_1k": 15.00},  # LiteLLM wraps, actual Opus pricing
+    "claude-opus-4-6": {"input_per_1k": 3.00, "output_per_1k": 15.00},
+    "claude-sonnet-4-6": {"input_per_1k": 3.00, "output_per_1k": 15.00},
+    "claude-haiku-4-5": {"input_per_1k": 0.25, "output_per_1k": 1.25},
+    "claude-opus-4-5": {"input_per_1k": 15.00, "output_per_1k": 75.00},
+    "claude-sonnet-4-5": {"input_per_1k": 3.00, "output_per_1k": 15.00},
+    "claude-haiku-3": {"input_per_1k": 0.25, "output_per_1k": 1.25},
+    # Legacy Claude 3.5 / Claude 3
     "claude-3-5-sonnet-20241022": {"input_per_1k": 3.00, "output_per_1k": 15.00},
     "claude-3-5-sonnet": {"input_per_1k": 3.00, "output_per_1k": 15.00},
     "claude-3-opus": {"input_per_1k": 15.00, "output_per_1k": 75.00},
