@@ -223,11 +223,12 @@ async def get_session(session_id: str, token: str = Depends(verify_token)):
         vote_counts = Counter()
         total_votes = 0
         for case in state.cases:
-            for ov in getattr(case, 'outside_votes', []):
-                vote_counts[ov.get('vote', 'abstain')] += 1
+            for ov in case.outside_votes:
+                # ov is an OutsideVote model — ov.vote is a VoteValue enum
+                vote_counts[ov.vote.value] += 1
                 total_votes += 1
 
-        # PII stats placeholder (PII redaction not yet implemented in Loophole)
+        # PII stats placeholder — PII redaction tracked separately per PHA-190
         pii_stats = PIIStats(redactions_applied=0, categories=[])
 
         # Context window usage (estimate from code + case text)
