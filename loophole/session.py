@@ -136,21 +136,36 @@ class SessionManager:
 
     def load(self, session_id: str) -> SessionState:
         state_path = self.base_dir / session_id / "state.json"
-        return SessionState.model_validate_json(state_path.read_text())
+        try:
+            return SessionState.model_validate_json(state_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            raise FileNotFoundError(f"Session {session_id} has corrupted state.json: {e}") from e
 
     def list_sessions(self) -> list[dict]:
         sessions = []
-        for p in sorted(self.base_dir.iterdir()):
-            state_path = p / "state.json"
-            if state_path.exists():
-                data = json.loads(state_path.read_text())
-                sessions.append({
-                    "id": data["session_id"],
-                    "domain": data["domain"],
-                    "round": data["current_round"],
-                    "cases": len(data["cases"]),
-                    "code_version": data["current_code"]["version"],
-                })
+        try:
+            entries = sorted(self.base_dir.iterdir())
+        except OSError as e:
+            # Broken symlink or permission issue in sessions dir — partial list only
+            return []
+        for p in entries:
+            try:
+                if not p.is_dir():
+                    continue
+                state_path = p / "state.json"
+                # exists() returns False for broken symlinks; read_text() catches the rest
+                if state_path.exists():
+                    data = json.loads(state_path.read_text())
+                    sessions.append({
+                        "id": data["session_id"],
+                        "domain": data["domain"],
+                        "round": data["current_round"],
+                        "cases": len(data["cases"]),
+                        "code_version": data["current_code"]["version"],
+                    })
+            except (json.JSONDecodeError, OSError, KeyError):
+                # Malformed directory or corrupted state.json — skip, don't crash the list
+                continue
         return sessions
 
     # ---- SQLite-only queries (no-op on JSON backend) ----
