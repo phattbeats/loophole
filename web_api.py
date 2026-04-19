@@ -561,7 +561,7 @@ async def get_all_session_costs(token: str = Depends(verify_token)):
             "total_input_tokens": data["total_input_tokens"],
             "total_output_tokens": data["total_output_tokens"],
         })
-    return {"sessions": result, "count": len(result)}}
+    return {"sessions": result, "count": len(result)}
 
 @api.delete("/sessions/{session_id}")
 async def delete_session(session_id: str, token: str = Depends(verify_token)):
