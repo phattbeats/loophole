@@ -6,51 +6,70 @@ on:
       - main
   workflow_dispatch:
 
+env:
+  REGISTRY: docker.io
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/loophole-unraid
+
 jobs:
   docker:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
 
     steps:
-      - name: Checkout
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Extract metadata
-        id: meta
-        run: |
-          SHA=${GITHUB_SHA::8}
-          echo "sha=$SHA" >> $GITHUB_OUTPUT
-
-          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          if [ -n "$TAG" ]; then
-            echo "version=$TAG" >> $GITHUB_OUTPUT
-            echo "tags=therealphatt/loophole-unraid:$TAG,therealphatt/loophole-unraid:latest,therealphatt/loophole-unraid:$SHA" >> $GITHUB_OUTPUT
-          else
-            echo "version=$SHA" >> $GITHUB_OUTPUT
-            echo "tags=therealphatt/loophole-unraid:$SHA,therealphatt/loophole-unraid:latest" >> $GITHUB_OUTPUT
-          fi
+      - name: Set up QEMU for multi-arch
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
-          username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v5
+      - name: Extract metadata (version, tags)
+        id: meta
+        run: |
+          SHA=${GITHUB_SHA::8}
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -n "$TAG" ]; then
+            echo "version=$TAG" >> $GITHUB_OUTPUT
+            echo "tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$TAG,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$SHA" >> $GITHUB_OUTPUT
+          else
+            echo "version=$SHA" >> $GITHUB_OUTPUT
+            echo "tags=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$SHA" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
             GITHUB_SHA=${{ github.sha }}
+
+      - name: Tag as latest (stable branch only)
+        if: github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
