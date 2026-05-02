@@ -131,7 +131,13 @@ class CostTracker:
         output_tokens: int,
         session_id: str,
     ) -> CostRecord:
+        if input_tokens < 0:
+            raise ValueError(f"input_tokens must be non-negative, got {input_tokens}")
+        if output_tokens < 0:
+            raise ValueError(f"output_tokens must be non-negative, got {output_tokens}")
         cost = compute_cost(model, input_tokens, output_tokens)
+        if cost < 0:
+            raise ValueError(f"cost_usd must be non-negative, got {cost}")
         record = CostRecord(
             timestamp=datetime.now(timezone.utc).isoformat(),
             agent_role=agent_role,
